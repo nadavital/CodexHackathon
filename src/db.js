@@ -500,6 +500,12 @@ class ProjectMemoryRepository {
       ORDER BY datetime(updated_at) DESC
       LIMIT ?
     `);
+    this.listMemoryRecordsByUpdatedRangeStmt = this.db.prepare(`
+      SELECT * FROM pm_memories
+      WHERE datetime(updated_at) >= datetime(?) AND datetime(updated_at) <= datetime(?)
+      ORDER BY datetime(updated_at) ASC
+      LIMIT ?
+    `);
     this.listMemoryRecordsBySourceStmt = this.db.prepare(`
       SELECT * FROM pm_memories
       WHERE source_id = ?
@@ -572,28 +578,6 @@ class ProjectMemoryRepository {
         reason = excluded.reason,
         confidence = excluded.confidence,
         is_active = excluded.is_active,
-        updated_at = excluded.updated_at
-    `);
-
-    this.createJobRunStmt = this.db.prepare(`
-      INSERT INTO pm_job_runs (
-        job_name, started_at, status, processed_count, metadata_json
-      ) VALUES (?, ?, 'running', 0, ?)
-    `);
-    this.finishJobRunStmt = this.db.prepare(`
-      UPDATE pm_job_runs
-      SET finished_at = ?, status = ?, processed_count = ?, error_text = ?, metadata_json = ?
-      WHERE run_id = ?
-    `);
-    this.touchJobStateStmt = this.db.prepare(`
-      INSERT INTO pm_jobs (
-        job_name, last_started_at, last_completed_at, last_status, last_run_id, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(job_name) DO UPDATE SET
-        last_started_at = excluded.last_started_at,
-        last_completed_at = excluded.last_completed_at,
-        last_status = excluded.last_status,
-        last_run_id = excluded.last_run_id,
         updated_at = excluded.updated_at
     `);
 
@@ -880,6 +864,11 @@ class ProjectMemoryRepository {
     return this.listMemoryRecordsStmt.all(bounded).map(mapPmMemoryRow);
   }
 
+  listMemoryRecordsByUpdatedRange({ startIso, endIso, limit = 2000 }) {
+    const bounded = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(5000, Number(limit))) : 2000;
+    return this.listMemoryRecordsByUpdatedRangeStmt.all(startIso, endIso, bounded).map(mapPmMemoryRow);
+  }
+
   listMemoryRecordsBySource(sourceId) {
     return this.listMemoryRecordsBySourceStmt.all(sourceId).map(mapPmMemoryRow);
   }
@@ -919,26 +908,6 @@ class ProjectMemoryRepository {
       this.db.exec("ROLLBACK");
       throw error;
     }
-  }
-
-  startJobRun({ jobName, startedAt, metadata = {} }) {
-    const result = this.createJobRunStmt.run(jobName, startedAt, JSON.stringify(metadata));
-    const runId = Number(result.lastInsertRowid);
-    this.touchJobStateStmt.run(jobName, startedAt, null, "running", runId, startedAt);
-    return runId;
-  }
-
-  finishJobRun({
-    runId,
-    jobName,
-    finishedAt,
-    status,
-    processedCount = 0,
-    errorText = null,
-    metadata = {},
-  }) {
-    this.finishJobRunStmt.run(finishedAt, status, processedCount, errorText, JSON.stringify(metadata), runId);
-    this.touchJobStateStmt.run(jobName, null, finishedAt, status, runId, finishedAt);
   }
 
   startExtractionRun({ sourceId, sourceVersion, model, startedAt, metadata = {} }) {

@@ -67,6 +67,44 @@
         },
         "required": ["question"]
       }
+    },
+    {
+      "name": "project_memory_ingest_processed",
+      "description": "Ingest processed markdown into versioned memory storage",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "filename": { "type": "string" },
+          "markdown": { "type": "string" },
+          "sourcePath": { "type": "string" },
+          "externalSourceId": { "type": "string" },
+          "agentfsUri": { "type": "string" }
+        },
+        "required": ["filename", "markdown"]
+      }
+    },
+    {
+      "name": "project_memory_records",
+      "description": "List extracted/versioned memory records",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "project_memory_export_date_range_markdown",
+      "description": "Export memories for a date range to a markdown file grouped by kind",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "startDate": { "type": "string" },
+          "endDate": { "type": "string" },
+          "limit": { "type": "number" }
+        },
+        "required": ["startDate", "endDate"]
+      }
     }
   ]
 }

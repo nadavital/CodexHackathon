@@ -4,6 +4,7 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  exportMemoriesDateRangeMarkdown,
   ingestProcessedMarkdown,
   listMemoryRecords,
   listRecentMemories,
@@ -108,6 +109,20 @@ const TOOL_DEFS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "project_memory_export_date_range_markdown",
+    description: "Export memories updated in a date range into a plain markdown file grouped by memory kind.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        startDate: { type: "string", description: "Inclusive start date/time (ISO or YYYY-MM-DD)." },
+        endDate: { type: "string", description: "Inclusive end date/time (ISO or YYYY-MM-DD)." },
+        limit: { type: "number", default: 2000 },
+      },
+      required: ["startDate", "endDate"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function sendMessage(payload) {
@@ -190,6 +205,14 @@ async function callTool(name, args = {}) {
     case "project_memory_records": {
       const records = await listMemoryRecords(Number(args.limit || 20));
       return { records };
+    }
+    case "project_memory_export_date_range_markdown": {
+      const result = await exportMemoriesDateRangeMarkdown({
+        startDate: String(args.startDate || ""),
+        endDate: String(args.endDate || ""),
+        limit: Number(args.limit || 2000),
+      });
+      return result;
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

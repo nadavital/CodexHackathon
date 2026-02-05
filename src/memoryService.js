@@ -15,6 +15,16 @@ import {
 
 const SOURCE_TYPES = new Set(["text", "link", "image"]);
 const EXTRACTOR_MODEL = "openai/gpt-5.1";
+const TOP_LEVEL_KIND_ORDER = [
+  "preferences",
+  "people",
+  "commitments",
+  "decisions",
+  "knowledge",
+  "resources",
+  "events",
+  "inbox",
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -49,6 +59,36 @@ function clampInt(value, min, max, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(parsed)));
+}
+
+function parseRangeDate(value, { endOfDay = false, fieldName = "date" } = {}) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    throw new Error(`Missing ${fieldName}`);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return `${raw}${endOfDay ? "T23:59:59.999Z" : "T00:00:00.000Z"}`;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid ${fieldName}: ${raw}`);
+  }
+  return parsed.toISOString();
+}
+
+function titleCaseKind(kind) {
+  const normalized = String(kind || "inbox")
+    .trim()
+    .toLowerCase();
+  return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
+}
+
+function isoSlug(value) {
+  return String(value || "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function normalizeSourceType(sourceType) {
@@ -726,71 +766,130 @@ export async function listMemoryRecords(limit = 50) {
   return projectMemoryRepo.listMemoryRecords(clampInt(limit, 1, 500, 50));
 }
 
-export async function runMemoryJob(jobName, handler, metadata = {}) {
-  const normalizedJobName = String(jobName || "").trim();
-  if (!normalizedJobName) {
-    throw new Error("Missing job name");
+export async function exportMemoriesDateRangeMarkdown({
+  startDate,
+  endDate,
+  limit = 2000,
+  outputDir = path.join(config.dataDir, "exports"),
+} = {}) {
+  const startIso = parseRangeDate(startDate, { fieldName: "startDate" });
+  const endIso = parseRangeDate(endDate, { fieldName: "endDate", endOfDay: true });
+  if (new Date(startIso).getTime() > new Date(endIso).getTime()) {
+    throw new Error(`startDate must be <= endDate (startDate=${startIso}, endDate=${endIso})`);
   }
 
-  const startedAt = nowIso();
-  const runId = projectMemoryRepo.startJobRun({
-    jobName: normalizedJobName,
-    startedAt,
-    metadata,
+  const rows = projectMemoryRepo.listMemoryRecordsByUpdatedRange({
+    startIso,
+    endIso,
+    limit: clampInt(limit, 1, 5000, 2000),
   });
 
-  try {
-    const result = await handler();
-    const finishedAt = nowIso();
-    const processedCount = Number(result?.processedCount || 0);
-    projectMemoryRepo.finishJobRun({
-      runId,
-      jobName: normalizedJobName,
-      finishedAt,
-      status: "success",
-      processedCount: Number.isFinite(processedCount) ? processedCount : 0,
-      metadata: {
-        ...metadata,
-        resultSummary: result?.summary || null,
-      },
-    });
-    return result;
-  } catch (error) {
-    const finishedAt = nowIso();
-    projectMemoryRepo.finishJobRun({
-      runId,
-      jobName: normalizedJobName,
-      finishedAt,
-      status: "failed",
-      processedCount: 0,
-      errorText: error instanceof Error ? error.message : String(error),
-      metadata,
-    });
-    throw error;
-  }
-}
+  const groups = new Map();
+  for (const row of rows) {
+    const summary = normalizeSentence(row.effectiveSummary || row.summaryAuto || "", 800);
+    if (!summary) continue;
 
-function detectTopLevelBucket(memory) {
-  const text = `${memory.effectiveSummary || ""} ${(memory.effectiveTags || []).join(" ")}`.toLowerCase();
-  if (text.includes("meeting") || text.includes("appointment") || text.includes("schedule")) return "events";
-  if (text.includes("todo") || text.includes("follow up") || text.includes("deadline") || text.includes("task")) return "commitments";
-  if (text.includes("decide") || text.includes("decision") || text.includes("chose") || text.includes("because")) return "decisions";
-  if (text.includes("preference") || text.includes("prefer") || text.includes("style") || text.includes("favorite")) return "preferences";
-  if (text.includes("contact") || text.includes("person") || text.includes("teammate") || text.includes("client")) return "people";
-  if (text.includes("http") || text.includes("file") || text.includes("reference") || text.includes("resource")) return "resources";
-  if (text.trim()) return "knowledge";
-  return "inbox";
-}
-
-function tagOverlapScore(a, b) {
-  const left = new Set(a || []);
-  const right = new Set(b || []);
-  if (!left.size || !right.size) return 0;
-  let overlap = 0;
-  for (const token of left) {
-    if (right.has(token)) overlap += 1;
+    const kind = String(row.metadata?.extractedKind || "inbox").toLowerCase();
+    if (!groups.has(kind)) groups.set(kind, []);
+    groups.get(kind).push({
+      summary,
+      sourceFilename: row.metadata?.sourceFilename || "(unknown)",
+      updatedAt: row.updatedAt,
+      confidence: Number.isFinite(Number(row.metadata?.extractionConfidence))
+        ? Number(row.metadata?.extractionConfidence)
+        : null,
+      tags: Array.isArray(row.effectiveTags) ? row.effectiveTags.filter(Boolean) : [],
+    });
   }
-  return overlap / Math.max(left.size, right.size);
+  for (const groupRows of groups.values()) {
+    groupRows.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }
+
+  const orderedKinds = [...groups.keys()].sort((a, b) => {
+    const ai = TOP_LEVEL_KIND_ORDER.indexOf(a);
+    const bi = TOP_LEVEL_KIND_ORDER.indexOf(b);
+    const left = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+    const right = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    return left - right || a.localeCompare(b);
+  });
+
+  const generatedAt = nowIso();
+  const lines = [
+    "# Agent Memory Brief",
+    "",
+    "Compact long-term memory context for assistant prompting.",
+    "",
+    "## Scope",
+    `- Range (UTC): ${startIso} to ${endIso}`,
+    `- Generated At (UTC): ${generatedAt}`,
+    `- Memory Statements: ${rows.length}`,
+    "",
+  ];
+
+  if (rows.length === 0) {
+    lines.push("No memories found in this date range.");
+    lines.push("");
+  } else {
+    for (const kind of orderedKinds) {
+      const kindRows = groups.get(kind) || [];
+      const seen = new Set();
+      const uniqueRows = [];
+      for (const row of kindRows) {
+        const key = row.summary.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueRows.push(row);
+      }
+
+      const tagCounts = new Map();
+      for (const row of uniqueRows) {
+        for (const tag of row.tags) {
+          const normalizedTag = String(tag || "")
+            .trim()
+            .toLowerCase();
+          if (!normalizedTag) continue;
+          tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
+        }
+      }
+      const topics = [...tagCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 8)
+        .map(([tag]) => tag);
+
+      lines.push(`## ${titleCaseKind(kind)}`);
+      if (topics.length > 0) {
+        lines.push(`Topics: ${topics.map((tag) => `\`${tag}\``).join(", ")}`);
+      }
+      lines.push("");
+      for (const memory of uniqueRows) {
+        const sourceSuffix = memory.sourceFilename && memory.sourceFilename !== "(unknown)"
+          ? ` _(source: ${memory.sourceFilename})_`
+          : "";
+        const lowConfidenceSuffix = Number.isFinite(memory.confidence) && memory.confidence < 0.7
+          ? " [low confidence]"
+          : "";
+        lines.push(`- ${memory.summary}${lowConfidenceSuffix}${sourceSuffix}`);
+      }
+      lines.push("");
+    }
+  }
+
+  const markdown = `${lines.join("\n").trim()}\n`;
+  await fs.mkdir(outputDir, { recursive: true });
+  const filePath = path.join(
+    outputDir,
+    `memory-export-${isoSlug(startIso)}-to-${isoSlug(endIso)}-${isoSlug(generatedAt)}.md`
+  );
+  await fs.writeFile(filePath, markdown, "utf8");
+
+  return {
+    startIso,
+    endIso,
+    generatedAt,
+    count: rows.length,
+    filePath,
+    markdown,
+  };
 }
 
 const CATEGORY_ID_BY_SLUG = {
@@ -947,6 +1046,7 @@ export async function applyExtractedMemories({
         memoryKind: "extracted_atomic_memory",
         extractedKind: kind,
         extractionModel: EXTRACTOR_MODEL,
+        extractedAt: now,
         extractionFingerprint: fingerprint,
         extractionConfidence: Number.isFinite(Number(row?.confidence)) ? Number(row.confidence) : null,
         citation: {
@@ -1126,130 +1226,4 @@ export async function applyConsolidatorAliasProposals({
   return {
     appliedAliasCount,
   };
-}
-
-export async function runOrganizerPass({ limit = 200 } = {}) {
-  return runMemoryJob(
-    "organizer",
-    async () => {
-      const rows = await listMemoryRecords(limit);
-      const suggestions = rows.slice(0, 50).map((row) => ({
-        memoryId: row.memoryId,
-        suggestedBucket: detectTopLevelBucket(row),
-      }));
-
-      const linkSuggestions = [];
-      const sample = rows.slice(0, Math.min(rows.length, 100));
-      for (let i = 0; i < sample.length; i += 1) {
-        for (let j = i + 1; j < sample.length; j += 1) {
-          const score = tagOverlapScore(sample[i].effectiveTags, sample[j].effectiveTags);
-          if (score >= 0.6) {
-            linkSuggestions.push({
-              memoryId: sample[i].memoryId,
-              relatedMemoryId: sample[j].memoryId,
-              confidence: score,
-            });
-          }
-        }
-      }
-
-      const assignmentSource = "organizer_heuristic";
-      const assignedAt = nowIso();
-      for (const suggestion of suggestions) {
-        projectMemoryRepo.replaceMemoryCategoriesBySource({
-          memoryId: suggestion.memoryId,
-          assignmentSource,
-          assignments: [
-            {
-              categoryId: categoryIdForBucket(suggestion.suggestedBucket),
-              confidence: 0.55,
-              reason: `heuristic:${suggestion.suggestedBucket}`,
-            },
-          ],
-          assignedAt,
-        });
-      }
-
-      for (const link of linkSuggestions) {
-        projectMemoryRepo.upsertRelatedMemory({
-          memoryId: link.memoryId,
-          relatedMemoryId: link.relatedMemoryId,
-          relationType: "similar_tags",
-          confidence: link.confidence,
-          reason: "organizer_heuristic_tag_overlap",
-          linkedAt: assignedAt,
-        });
-        projectMemoryRepo.upsertRelatedMemory({
-          memoryId: link.relatedMemoryId,
-          relatedMemoryId: link.memoryId,
-          relationType: "similar_tags",
-          confidence: link.confidence,
-          reason: "organizer_heuristic_tag_overlap",
-          linkedAt: assignedAt,
-        });
-      }
-
-      return {
-        processedCount: rows.length,
-        summary: `persisted ${suggestions.length} category assignments and ${linkSuggestions.length} bidirectional link pairs`,
-        suggestions,
-        linkSuggestions,
-      };
-    },
-    { mode: "heuristic", limit }
-  );
-}
-
-export async function runConsolidatorPass({ limit = 200 } = {}) {
-  return runMemoryJob(
-    "consolidator",
-    async () => {
-      const rows = await listMemoryRecords(limit);
-      const sourceIdByMemoryId = new Map(rows.map((row) => [row.memoryId, row.sourceId]));
-      const groupedBySummary = new Map();
-      for (const row of rows) {
-        const key = String(row.effectiveSummary || "").toLowerCase().trim();
-        if (!key) continue;
-        if (!groupedBySummary.has(key)) groupedBySummary.set(key, []);
-        groupedBySummary.get(key).push(row.memoryId);
-      }
-
-      const candidateAliases = [];
-      for (const [summary, ids] of groupedBySummary.entries()) {
-        if (ids.length < 2) continue;
-        candidateAliases.push({
-          summary,
-          canonicalMemoryId: ids[0],
-          duplicateMemoryIds: ids.slice(1),
-        });
-      }
-
-      const aliasUpdatedAt = nowIso();
-      let aliasProposalCount = 0;
-      for (const candidate of candidateAliases) {
-        const canonicalSourceId = sourceIdByMemoryId.get(candidate.canonicalMemoryId);
-        if (!canonicalSourceId) continue;
-        for (const duplicateMemoryId of candidate.duplicateMemoryIds) {
-          const aliasSourceId = sourceIdByMemoryId.get(duplicateMemoryId);
-          if (!aliasSourceId || aliasSourceId === canonicalSourceId) continue;
-          projectMemoryRepo.upsertSourceAlias({
-            aliasSourceId,
-            canonicalSourceId,
-            reason: "consolidator_fuzzy_candidate_pending_review",
-            confidence: 0.6,
-            isActive: false,
-            updatedAt: aliasUpdatedAt,
-          });
-          aliasProposalCount += 1;
-        }
-      }
-
-      return {
-        processedCount: rows.length,
-        summary: `generated ${candidateAliases.length} consolidation candidate groups and persisted ${aliasProposalCount} alias proposals`,
-        candidateAliases,
-      };
-    },
-    { mode: "heuristic", limit }
-  );
 }

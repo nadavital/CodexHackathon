@@ -2,6 +2,7 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  exportMemoriesDateRangeMarkdown,
   ingestProcessedMarkdown,
   listMemoryRecords,
   listRecentMemories,
@@ -73,6 +74,13 @@ async function run() {
         break;
       case "project_memory_records":
         result = await listMemoryRecords(Number(args.limit || 20));
+        break;
+      case "project_memory_export_date_range_markdown":
+        result = await exportMemoriesDateRangeMarkdown({
+          startDate: String(args.startDate || ""),
+          endDate: String(args.endDate || ""),
+          limit: Number(args.limit || 2000),
+        });
         break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
