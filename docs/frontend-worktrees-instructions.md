@@ -1,52 +1,32 @@
-# Frontend Worktrees Playbook (v2)
+# Frontend Worktrees Playbook (v3, Component-First)
 
-Use this playbook to run parallel frontend workstreams with consistent design quality and safe merges.
+Use this playbook to move fast with parallel worktrees and near-zero merge conflicts.
+
+## Locked visual source of truth
+
+All UI work must match these files:
+
+- `uiconcepts/homescreen.png`
+- `uiconcepts/individualfolder.png`
+
+Do not add visual concepts not present in these screens unless the user explicitly asks.
 
 ## Required skill
 
-All frontend worktrees must use:
+Every frontend worktree must use:
 `[$project-memory-openai-ui](/Users/nadav/Desktop/Hackathon/skills/project-memory-openai-ui/SKILL.md)`
 
-## What changed after retro
+## Core strategy
 
-These are now mandatory because they caused issues in the last run:
+1. Migrate from monolith (`public/app.js`, `public/styles.css`) to modular components.
+2. Give each worktree exclusive file ownership.
+3. Use one scaffold phase, one parallel phase, and one compose phase.
+4. Merge in strict order.
 
-1. Never start work on local `main`; work only in a named worktree branch.
-2. Run preflight (`pwd`, branch, status) before any edit.
-3. Keep file scope strict by workstream.
-4. Never commit runtime DB artifacts (`data/*.db-*`).
-5. Do not edit `src/` from frontend workstreams.
-6. Use a consistent branch naming scheme.
+## Non-negotiable rules
 
-## Branch naming standard
-
-Use this exact format:
-- `codex/wt-<workstream>`
-
-Examples:
-- `codex/wt-foundation`
-- `codex/wt-adapter`
-- `codex/wt-capture`
-- `codex/wt-stream`
-- `codex/wt-ask`
-- `codex/wt-polish`
-
-## One-time setup
-
-Run from repo root:
-
-```bash
-git worktree add ../Hackathon-wt-foundation -b codex/wt-foundation
-git worktree add ../Hackathon-wt-adapter -b codex/wt-adapter
-git worktree add ../Hackathon-wt-capture -b codex/wt-capture
-git worktree add ../Hackathon-wt-stream -b codex/wt-stream
-git worktree add ../Hackathon-wt-ask -b codex/wt-ask
-git worktree add ../Hackathon-wt-polish -b codex/wt-polish
-```
-
-## Preflight (mandatory)
-
-Run this before asking questions or editing:
+1. Never work directly on local `main`.
+2. Run preflight before editing:
 
 ```bash
 pwd
@@ -54,125 +34,270 @@ git branch --show-current
 git status --short
 ```
 
-If output is not the intended worktree branch, stop and fix setup first.
-
-## Shared rules for every worktree
-
-- Keep the app bright and calm; do not add a persistent sidebar by default.
-- Keep the story obvious: `capture -> enrich feedback -> retrieve -> cite`.
-- Do not block on backend completion; handle endpoint variation in frontend adapter logic.
-- Preserve heuristic fallback behavior.
-- Ask the workstream question pack before coding.
-- Add visible loading, empty, success, and error states for owned surfaces.
-- Run a quick manual pass on desktop and mobile widths.
-
-## Scope guardrails
-
-Frontend workstreams may change only:
-- `public/index.html`
-- `public/app.js`
-- `public/styles.css`
-- `docs/worktree-<id>-answers.md`
-
-Do not modify:
+3. Frontend worktrees must not modify:
 - `src/*`
-- `data/*.db-*`
 - `mcp/*`
 - `openclaw/*`
+- `data/*.db*`
 
-## Workstream ownership
+4. Keep branch names as `codex/wt-<name>`.
+5. Ask the worktree-specific question pack before writing code.
 
-### A: Foundation (`codex/wt-foundation`)
+## Target modular file layout
 
-- Primary: `public/index.html`, `public/styles.css`
-- Optional: tiny `public/app.js` hooks only if required
+The scaffold branch creates this structure:
 
-### B: Adapter (`codex/wt-adapter`)
-
-- Primary: `public/app.js`
-- Optional: minimal status/fallback hooks in `public/index.html` and `public/styles.css`
-
-### C: Capture (`codex/wt-capture`)
-
-- Primary: capture section in `public/index.html`
-- Primary: capture logic in `public/app.js`
-- Primary: capture styles in `public/styles.css`
-
-### D: Stream (`codex/wt-stream`)
-
-- Primary: stream section in `public/index.html`
-- Primary: stream/search/filter logic in `public/app.js`
-- Primary: stream/card styles in `public/styles.css`
-
-### E: Ask (`codex/wt-ask`)
-
-- Primary: ask/citation section in `public/index.html`
-- Primary: answer/citation logic in `public/app.js`
-- Primary: ask/citation styles in `public/styles.css`
-
-### F: Polish (`codex/wt-polish`)
-
-- Cross-cutting refinement in `public/*`
-- `README.md` only if demo instructions actually changed
-
-## Mandatory question-first flow
-
-Before coding, each worktree must:
-
-1. Read skill + references.
-2. Ask exact workstream question set.
-3. Wait for answers.
-4. Restate accepted direction in bullets.
-5. Implement.
-
-## Final checks before commit
-
-Run:
-
-```bash
-git diff --name-only
+```text
+public/
+  index.html
+  app/
+    main.js
+    router.js
+    pages/
+      home-page.js
+      folder-page.js
+    state/
+      store.js
+    services/
+      api-client.js
+      mappers.js
+    components/
+      topbar/
+        topbar.js
+      home-folder-grid/
+        home-folder-grid.js
+      home-recent-list/
+        home-recent-list.js
+      folder-hero-toolbar/
+        folder-hero-toolbar.js
+      folder-item-grid/
+        folder-item-grid.js
+      composer/
+        composer.js
+  styles/
+    tokens.css
+    base.css
+    pages/
+      home.css
+      folder.css
+    components/
+      topbar.css
+      home-folder-grid.css
+      home-recent-list.css
+      folder-hero-toolbar.css
+      folder-item-grid.css
+      composer.css
 ```
 
-Then confirm:
+## Worktree plan
 
-1. Only in-scope files changed.
-2. No `data/*.db-*` files changed.
-3. No `src/*` files changed.
+### Phase 1: Scaffold first (single worktree, no parallel edits yet)
 
-If violations appear, clean them before commit.
+Branch: `codex/wt-ui-shell`
 
-## PR handoff template
+Goal:
+- Create modular folders/files above.
+- Move existing monolith behavior into `pages/*`, `services/*`, and `state/*` scaffolds.
+- Wire empty component placeholders so later branches only touch owned component files.
 
-Use this exact format:
+Owned files:
+- `public/index.html`
+- `public/app/main.js`
+- `public/app/router.js`
+- `public/app/pages/home-page.js`
+- `public/app/pages/folder-page.js`
+- `public/styles/tokens.css`
+- `public/styles/base.css`
+- `public/styles/pages/home.css`
+- `public/styles/pages/folder.css`
+
+Do not implement detailed component visuals here. Only shell + plumbing.
+
+### Phase 2: Parallel component worktrees
+
+Create all branches from latest `main` after `codex/wt-ui-shell` is merged.
+
+#### A. Top bar
+
+Branch: `codex/wt-ui-topbar`
+
+Image slice:
+- Top header row from both screens (logo/title, breadcrumb where relevant, search, settings).
+
+Owned files:
+- `public/app/components/topbar/topbar.js`
+- `public/styles/components/topbar.css`
+
+Question pack:
+1. Should the home screen header text stay "Smart File Manager" or switch to "Project Memory"?
+2. In folder view, should breadcrumb be clickable for each segment?
+3. Keep settings as icon-only, or icon + label?
+
+#### B. Home folder grid
+
+Branch: `codex/wt-ui-home-folder-grid`
+
+Image slice:
+- Folder cards grid in `homescreen.png`.
+
+Owned files:
+- `public/app/components/home-folder-grid/home-folder-grid.js`
+- `public/styles/components/home-folder-grid.css`
+
+Question pack:
+1. Should folder card count show exact counts from API or placeholder until loaded?
+2. Keep three-dot menu visible always or on hover?
+3. Should clicking a folder navigate immediately or single-click select + double-click open?
+
+#### C. Home recent list
+
+Branch: `codex/wt-ui-home-recent-list`
+
+Image slice:
+- "Recent Files" block in `homescreen.png`.
+
+Owned files:
+- `public/app/components/home-recent-list/home-recent-list.js`
+- `public/styles/components/home-recent-list.css`
+
+Question pack:
+1. Max rows in recent list before scroll (e.g., 4, 6, 8)?
+2. Show file type icon only, or icon + source badge?
+3. Should row click open folder context directly?
+
+#### D. Folder hero + toolbar
+
+Branch: `codex/wt-ui-folder-hero-toolbar`
+
+Image slice:
+- Folder heading block + filter tabs + "New" action in `individualfolder.png`.
+
+Owned files:
+- `public/app/components/folder-hero-toolbar/folder-hero-toolbar.js`
+- `public/styles/components/folder-hero-toolbar.css`
+
+Question pack:
+1. Keep tabs exactly `All / Images / Videos / Favorites` or map to memory types?
+2. Should "New" open capture composer focus or a modal?
+3. Should filter button open a dropdown or cycle preset filters?
+
+#### E. Folder item grid
+
+Branch: `codex/wt-ui-folder-item-grid`
+
+Image slice:
+- Main content cards grid in `individualfolder.png`.
+
+Owned files:
+- `public/app/components/folder-item-grid/folder-item-grid.js`
+- `public/styles/components/folder-item-grid.css`
+
+Question pack:
+1. Keep metadata line as "Uploaded <time>" or use project-specific timestamps?
+2. Show favorite star on selected cards only or persisted where tagged?
+3. Should card menu be always visible or on hover?
+
+#### F. Shared composer
+
+Branch: `codex/wt-ui-composer`
+
+Image slice:
+- Bottom input bar from both screens.
+
+Owned files:
+- `public/app/components/composer/composer.js`
+- `public/styles/components/composer.css`
+
+Rules:
+- No voice controls.
+- Fixed structure: plus button, folder picker, text input, send action.
+
+Question pack:
+1. Placeholder copy for home vs folder view: same text or contextual text?
+2. Send action style: icon-only or text button?
+3. Plus button should open file picker immediately, or action menu?
+
+#### G. Data adapter and state
+
+Branch: `codex/wt-ui-adapter`
+
+Owned files:
+- `public/app/services/api-client.js`
+- `public/app/services/mappers.js`
+- `public/app/state/store.js`
+
+Rules:
+- No visual CSS changes.
+- Support current backend + fallback mode.
+- Expose stable page/view model shape to UI components.
+
+Question pack:
+1. Which folder ID/name should be default selected on initial load?
+2. Should failed endpoints show stale cache or empty state first?
+3. Confirm required fields for each card (title, preview, timestamp, tags).
+
+### Phase 3: Compose/integration worktree
+
+Branch: `codex/wt-ui-compose`
+
+Goal:
+- Import all component modules into pages.
+- Ensure `home-page` and `folder-page` use components without file ownership violations.
+- Final responsive pass and interaction glue.
+
+Owned files:
+- `public/app/main.js`
+- `public/app/router.js`
+- `public/app/pages/home-page.js`
+- `public/app/pages/folder-page.js`
+- `public/styles/base.css`
+- `public/styles/pages/home.css`
+- `public/styles/pages/folder.css`
+
+Must not edit component-owned files.
+
+## Merge order (strict)
+
+1. Merge `codex/wt-ui-shell` to `main`.
+2. Merge in any order:
+- `codex/wt-ui-topbar`
+- `codex/wt-ui-home-folder-grid`
+- `codex/wt-ui-home-recent-list`
+- `codex/wt-ui-folder-hero-toolbar`
+- `codex/wt-ui-folder-item-grid`
+- `codex/wt-ui-composer`
+- `codex/wt-ui-adapter`
+3. Merge `codex/wt-ui-compose` last.
+
+## Per-worktree completion checklist
+
+1. Only owned files changed.
+2. Component matches only its assigned image slice.
+3. Loading, empty, success, error states covered for the component.
+4. Desktop + mobile sanity check done.
+5. Handoff notes include any unanswered design questions.
+
+## Handoff template
 
 ```text
 Skill used: $project-memory-openai-ui
+Worktree branch: <branch>
+Image slice implemented: <exact slice>
 User answers applied:
-- ...
-
-What changed:
 - ...
 
 Files changed:
 - ...
 
-State coverage:
+States covered:
 - Loading:
 - Empty:
 - Success:
 - Error:
 
 Scope check:
-- Out-of-scope files touched: yes/no
+- Only owned files touched: yes/no
 
-Open questions for user:
+Open questions:
 - ...
 ```
-
-## Merge sequence for coordinator
-
-1. Merge/finalize foundation first.
-2. Merge adapter second.
-3. Merge capture + stream + ask.
-4. Merge polish last.
-5. Use an integration branch and curate conflicts instead of direct branch-to-main merges.
