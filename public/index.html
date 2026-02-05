@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Memory</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb bg-orb-a"></div>
+    <div class="bg-orb bg-orb-b"></div>
+
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Hackathon Build</p>
+          <h1>Project Memory</h1>
+          <p class="subtitle">AI-powered personal knowledge vault with MCP + OpenClaw-ready tools.</p>
+        </div>
+        <div class="status" id="status-pill">checking model status...</div>
+      </header>
+
+      <section class="grid">
+        <article class="card capture-card">
+          <h2>Capture</h2>
+          <form id="capture-form">
+            <label>
+              Source type
+              <select id="source-type" name="sourceType">
+                <option value="text">Text</option>
+                <option value="link">Link</option>
+                <option value="image">Image</option>
+              </select>
+            </label>
+
+            <label>
+              Project (optional)
+              <input id="project-input" name="project" placeholder="launch-site, ios-app, growth" />
+            </label>
+
+            <label id="source-url-wrap" class="hidden">
+              Source URL
+              <input id="source-url-input" name="sourceUrl" placeholder="https://..." />
+            </label>
+
+            <label>
+              Content
+              <textarea id="content-input" name="content" rows="6" placeholder="Drop notes, context, ideas, decisions, TODOs..."></textarea>
+            </label>
+
+            <label id="image-wrap" class="hidden file-input-wrap">
+              Image
+              <input id="image-input" type="file" accept="image/*" />
+              <img id="image-preview" alt="image preview" class="image-preview hidden" />
+            </label>
+
+            <button class="btn" id="save-btn" type="submit">Save Memory</button>
+          </form>
+        </article>
+
+        <article class="card stream-card">
+          <div class="card-header">
+            <h2>Memory Stream</h2>
+            <button id="refresh-btn" class="btn subtle">Refresh</button>
+          </div>
+
+          <div class="row filters-row">
+            <input id="search-input" placeholder="Search memory..." />
+            <input id="project-filter-input" placeholder="Project filter" />
+            <button id="search-btn" class="btn subtle">Search</button>
+          </div>
+
+          <div id="notes-list" class="notes-list"></div>
+        </article>
+
+        <article class="card chat-card">
+          <h2>Grounded Chat</h2>
+          <form id="chat-form">
+            <label>
+              Ask your memory
+              <textarea id="question-input" rows="4" placeholder="What decisions did I make for launch onboarding?"></textarea>
+            </label>
+            <button class="btn" type="submit">Ask</button>
+          </form>
+
+          <div class="response-wrap">
+            <p class="response-title">Answer</p>
+            <pre id="answer-output" class="answer-output">No question yet.</pre>
+          </div>
+
+          <div class="response-wrap">
+            <p class="response-title">Citations</p>
+            <div id="citation-list" class="citation-list"></div>
+          </div>
+
+          <button id="context-btn" class="btn subtle">Generate Project Context Brief</button>
+        </article>
+      </section>
+    </main>
+
+    <template id="note-template">
+      <article class="note-item">
+        <div class="note-top">
+          <span class="note-project"></span>
+          <span class="note-score"></span>
+        </div>
+        <p class="note-summary"></p>
+        <p class="note-content"></p>
+        <div class="note-tags"></div>
+        <div class="note-meta"></div>
+      </article>
+    </template>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
