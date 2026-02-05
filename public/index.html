@@ -4,164 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Project Memory</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/base.css" />
+    <link rel="stylesheet" href="/styles/pages/home.css" />
+    <link rel="stylesheet" href="/styles/pages/folder.css" />
+    <link rel="stylesheet" href="/styles/components/topbar.css" />
+    <link rel="stylesheet" href="/styles/components/home-folder-grid.css" />
+    <link rel="stylesheet" href="/styles/components/home-recent-list.css" />
+    <link rel="stylesheet" href="/styles/components/folder-hero-toolbar.css" />
+    <link rel="stylesheet" href="/styles/components/folder-item-grid.css" />
+    <link rel="stylesheet" href="/styles/components/composer.css" />
   </head>
   <body>
     <div class="bg-orb bg-orb-a"></div>
     <div class="bg-orb bg-orb-b"></div>
 
-    <main class="shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">Hackathon Build</p>
-          <h1>Project Memory</h1>
-          <p class="subtitle">AI-powered personal knowledge vault with MCP + OpenClaw-ready tools.</p>
-        </div>
-        <div class="status-wrap">
-          <div class="status" id="status-pill">checking model status...</div>
-          <div class="adapter-badge hidden" id="adapter-badge">Fallback Active</div>
-          <p class="adapter-helper hidden" id="adapter-helper"></p>
-        </div>
-      </header>
-
-      <section class="grid">
-        <article class="card capture-card">
-          <div class="capture-head">
-            <h2>Capture</h2>
-            <p class="capture-subtitle">Drop notes, links, or images. We infer structure and enrich it.</p>
-          </div>
-
-          <form id="capture-form" class="capture-form">
-            <label class="capture-composer-label" for="content-input">Add memory</label>
-            <textarea id="content-input" name="content" rows="6" placeholder="Paste a thought, decision, URL, or quick update..."></textarea>
-
-            <label>
-              Project (optional)
-              <input id="project-input" name="project" placeholder="launch-site, ios-app, growth" />
-            </label>
-
-            <div id="image-drop-zone" class="image-drop-zone" role="button" tabindex="0" aria-label="Image upload zone">
-              <input id="image-input" type="file" accept="image/*" class="visually-hidden" />
-              <p class="image-drop-copy">
-                Drag and drop an image, or
-                <button id="image-picker-btn" class="inline-btn" type="button">choose a file</button>
-              </p>
-              <p id="image-name" class="image-name hidden"></p>
-              <img id="image-preview" alt="image preview" class="image-preview hidden" />
-              <button id="remove-image-btn" class="btn subtle small hidden" type="button">Remove image</button>
-            </div>
-
-            <p id="capture-hint" class="capture-hint">Tip: keep it minimal. Paste text, a URL, or an image and we infer the rest.</p>
-
-            <button class="btn" id="save-btn" type="submit">Save Memory</button>
-          </form>
-        </article>
-
-        <article class="card stream-card">
-          <div class="card-header">
-            <div>
-              <h2>Memory Stream</h2>
-              <p class="stream-subtitle">Compact discovery view with expandable detail.</p>
-            </div>
-            <div class="stream-actions">
-              <button id="stream-controls-btn" class="btn subtle" type="button">Filters &amp; Sort</button>
-              <button id="refresh-btn" class="btn subtle" type="button">Refresh</button>
-            </div>
-          </div>
-
-          <div id="stream-controls" class="stream-controls hidden">
-            <div class="row stream-fields">
-              <input id="search-input" placeholder="Search memory..." />
-              <input id="project-filter-input" placeholder="Project filter (optional)" />
-            </div>
-            <div class="row stream-selectors">
-              <label class="compact-field">
-                Sort
-                <select id="sort-select">
-                  <option value="newest">Newest first</option>
-                  <option value="oldest">Oldest first</option>
-                  <option value="score">Best match</option>
-                </select>
-              </label>
-              <label class="compact-field">
-                Type
-                <select id="type-filter-select">
-                  <option value="">All types</option>
-                  <option value="text">Text</option>
-                  <option value="link">Link</option>
-                  <option value="image">Image</option>
-                </select>
-              </label>
-              <button id="search-btn" class="btn subtle" type="button">Apply</button>
-            </div>
-          </div>
-
-          <div id="notes-list" class="notes-list"></div>
-        </article>
-
-        <article class="card chat-card">
-          <h2>Grounded Chat</h2>
-          <form id="chat-form">
-            <label>
-              Ask your memory
-              <textarea id="question-input" rows="4" placeholder="What decisions did I make for launch onboarding?"></textarea>
-            </label>
-            <button class="btn" type="submit">Ask</button>
-          </form>
-
-          <div class="response-wrap">
-            <p class="response-title">Answer</p>
-            <div id="answer-output" class="answer-output">No question yet.</div>
-            <p id="answer-meta" class="response-meta"></p>
-          </div>
-
-          <div class="response-wrap">
-            <p class="response-title">Citations</p>
-            <div id="citation-list" class="citation-list"></div>
-          </div>
-
-          <button id="context-btn" class="btn subtle" type="button">Generate Project Context Brief</button>
-        </article>
-      </section>
-    </main>
-
-    <template id="note-template">
-      <article class="note-item stream-mini-card" role="button" tabindex="0">
-        <div class="mini-card-head">
-          <p class="mini-title"></p>
-          <span class="mini-score"></span>
-        </div>
-        <p class="mini-content"></p>
-        <div class="mini-ai-block">
-          <p class="mini-ai-label">AI Notes</p>
-          <p class="mini-summary"></p>
-        </div>
-        <img class="mini-image hidden" alt="memory preview image" />
-        <div class="note-tags"></div>
-        <p class="mini-meta"></p>
-      </article>
-    </template>
-
-    <div id="memory-modal" class="memory-modal hidden" aria-hidden="true">
-      <div id="memory-modal-backdrop" class="memory-modal-backdrop"></div>
-      <article class="memory-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-modal-title">
-        <button id="memory-modal-close" class="btn subtle modal-close-btn" type="button">Close</button>
-        <p class="modal-kicker">Memory detail</p>
-        <h3 id="memory-modal-title" class="modal-title"></h3>
-        <p id="memory-modal-content" class="modal-content"></p>
-        <section class="modal-section">
-          <p class="modal-label">AI Notes</p>
-          <p id="memory-modal-summary" class="modal-summary"></p>
-        </section>
-        <img id="memory-modal-image" class="modal-image hidden" alt="full memory image" />
-        <a id="memory-modal-source" class="modal-link hidden" target="_blank" rel="noreferrer"></a>
-        <div id="memory-modal-tags" class="note-tags"></div>
-        <p id="memory-modal-meta" class="note-meta"></p>
-      </article>
-    </div>
+    <main id="app-root" class="shell"></main>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-    <script src="/app.js" type="module"></script>
+    <script src="/app/main.js" type="module"></script>
   </body>
 </html>

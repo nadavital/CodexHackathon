@@ -1,0 +1,5 @@
+/* Placeholder: home folder grid visuals are owned by codex/wt-ui-home-folder-grid. */
+.home-folder-grid-card {
+  display: grid;
+  gap: 10px;
+}

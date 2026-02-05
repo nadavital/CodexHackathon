@@ -1,0 +1,5 @@
+/* Placeholder: folder item grid visuals are owned by codex/wt-ui-folder-item-grid. */
+.folder-item-grid-card {
+  display: grid;
+  gap: 10px;
+}

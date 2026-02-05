@@ -1,0 +1,5 @@
+/* Placeholder: folder hero + toolbar visuals are owned by codex/wt-ui-folder-hero-toolbar. */
+.folder-hero-toolbar-card {
+  display: grid;
+  gap: 8px;
+}

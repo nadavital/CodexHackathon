@@ -1,0 +1,15 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+:root {
+  --bg: #f5efe6;
+  --surface: rgba(255, 255, 255, 0.85);
+  --surface-strong: #ffffff;
+  --ink: #122217;
+  --muted: #486455;
+  --accent: #0d8f63;
+  --accent-deep: #0a6f4d;
+  --warn: #bd5b2d;
+  --border: rgba(18, 34, 23, 0.12);
+  --shadow: 0 18px 48px rgba(18, 34, 23, 0.12);
+  --overlay: rgba(10, 20, 15, 0.5);
+}

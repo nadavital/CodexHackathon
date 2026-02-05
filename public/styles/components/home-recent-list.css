@@ -1,0 +1,5 @@
+/* Placeholder: home recent list visuals are owned by codex/wt-ui-home-recent-list. */
+.stream-card {
+  display: grid;
+  gap: 10px;
+}

@@ -1,0 +1,47 @@
+.page-folder {
+  gap: 14px;
+}
+
+.folder-hero-toolbar-card,
+.folder-item-grid-card {
+  min-height: auto;
+}
+
+.folder-hero-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.folder-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.folder-tab-row .btn {
+  width: auto;
+}
+
+.folder-items-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.folder-item-card {
+  min-height: 108px;
+}
+
+.page-folder .composer-shell {
+  min-height: auto;
+}
+
+@media (max-width: 640px) {
+  .folder-hero-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
