@@ -204,7 +204,9 @@ export function createFolderPage({ store, apiClient }) {
       let isMounted = true;
       let attachment = {
         name: "",
-        imageDataUrl: null,
+        fileDataUrl: null,
+        fileMimeType: "",
+        isImage: false,
       };
 
       if (els.projectInput) {
@@ -487,7 +489,9 @@ export function createFolderPage({ store, apiClient }) {
       function clearAttachment() {
         attachment = {
           name: "",
-          imageDataUrl: null,
+          fileDataUrl: null,
+          fileMimeType: "",
+          isImage: false,
         };
 
         if (els.fileInput) {
@@ -501,10 +505,13 @@ export function createFolderPage({ store, apiClient }) {
         els.selectedFilePill?.classList.add("hidden");
       }
 
-      function setAttachment(fileName, imageDataUrl = null) {
+      function setAttachment(fileName, fileDataUrl = null, fileMimeType = "") {
+        const normalizedMime = String(fileMimeType || "").toLowerCase();
         attachment = {
           name: fileName,
-          imageDataUrl,
+          fileDataUrl,
+          fileMimeType: normalizedMime,
+          isImage: normalizedMime.startsWith("image/"),
         };
 
         if (els.selectedFileName) {
@@ -545,18 +552,13 @@ export function createFolderPage({ store, apiClient }) {
         const file = els.fileInput?.files?.[0];
         if (!file) return;
 
-        if (String(file.type || "").startsWith("image/")) {
-          try {
-            const imageDataUrl = await fileToDataUrl(file);
-            setAttachment(file.name || "image", imageDataUrl);
-          } catch (error) {
-            setCaptureHint(conciseTechnicalError(error, "Image read failed"), "warn");
-            showToast("Image read failed", "error");
-          }
-          return;
+        try {
+          const fileDataUrl = await fileToDataUrl(file);
+          setAttachment(file.name || "file", fileDataUrl, file.type || "");
+        } catch (error) {
+          setCaptureHint(conciseTechnicalError(error, "File read failed"), "warn");
+          showToast("File read failed", "error");
         }
-
-        setAttachment(file.name || "file", null);
       });
 
       on(els.clearFileBtn, "click", () => {
@@ -576,20 +578,25 @@ export function createFolderPage({ store, apiClient }) {
         const content = rawContent || (attachment.name ? `File: ${attachment.name}` : "");
         const selectedProject = String(els.projectSelect?.value || folderMeta.name || "").trim();
 
-        if (!content && !attachment.imageDataUrl) {
+        if (!content && !attachment.fileDataUrl) {
           setCaptureHint("Add text, link, image, or file.", "warn");
           showToast("Add content first", "error");
           els.contentInput?.focus();
           return;
         }
 
-        const inferred = inferCaptureType(content, attachment.imageDataUrl);
+        const inferred = attachment.fileDataUrl
+          ? { sourceType: attachment.isImage ? "image" : "file", sourceUrl: "" }
+          : inferCaptureType(content, null);
         const payload = {
           sourceType: inferred.sourceType,
           content,
           sourceUrl: inferred.sourceUrl,
           project: selectedProject || folderMeta.name,
-          imageDataUrl: attachment.imageDataUrl,
+          imageDataUrl: attachment.isImage ? attachment.fileDataUrl : null,
+          fileDataUrl: attachment.fileDataUrl,
+          fileName: attachment.name || "",
+          fileMimeType: attachment.fileMimeType || "",
         };
 
         setState({ loading: true });
@@ -612,7 +619,7 @@ export function createFolderPage({ store, apiClient }) {
           if (!isMounted) return;
 
           const message = conciseTechnicalError(error, "Save endpoint unavailable");
-          const validationLike = /missing content|invalid image|invalid json|request failed \(4\d\d\)/i.test(message);
+          const validationLike = /missing content|invalid image|invalid file|invalid json|request failed \(4\d\d\)/i.test(message);
 
           if (validationLike) {
             setCaptureHint(message, "warn");

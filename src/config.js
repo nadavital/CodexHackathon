@@ -44,9 +44,17 @@ function parsePort(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function resolveDataPath(value, fallbackAbsolutePath) {
+  if (!value) return fallbackAbsolutePath;
+  return path.isAbsolute(value) ? value : path.resolve(ROOT_DIR, value);
+}
+
 export const config = {
   port: parsePort(process.env.PORT, 8787),
-  openaiApiKey: process.env.OPENAI_API_KEY || "",
+  openaiApiKey:
+    process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
+      ? process.env.OPENAI_API_KEY
+      : "",
   openaiBaseUrl: (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, ""),
   openaiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-4.1-mini",
   openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
@@ -55,6 +63,14 @@ export const config = {
   uploadDir: UPLOAD_DIR,
   mcpServerName: process.env.MCP_SERVER_NAME || "project-memory",
   mcpServerVersion: process.env.MCP_SERVER_VERSION || "0.1.0",
+  consolidatedMemoryMarkdownFile: resolveDataPath(
+    process.env.CONSOLIDATED_MEMORY_MARKDOWN_FILE,
+    path.join(DATA_DIR, "consolidated-memory.md")
+  ),
+  extractedMemoryMarkdownFile: resolveDataPath(
+    process.env.EXTRACTED_MEMORY_MARKDOWN_FILE,
+    path.join(DATA_DIR, "extracted-memory.md")
+  ),
 };
 
 export function publicUploadPath(fileName) {

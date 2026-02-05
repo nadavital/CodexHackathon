@@ -17,9 +17,10 @@ AI-powered personal project memory with:
 ## Project structure
 
 - `src/server.js`: web server + API + static UI hosting
-- `src/memoryService.js`: save/search/context/chat logic
+- `src/memoryService.js`: save/search/context/chat/file extraction logic
 - `src/openai.js`: Responses + Embeddings API wrappers
 - `src/db.js`: SQLite schema + repository
+- `src/tasksDb.js`: local tasks table/repository
 - `mcp/server.js`: MCP stdio server exposing memory tools
 - `openclaw/bridge.js`: command bridge for OpenClaw tools
 - `openclaw/tools.manifest.json`: OpenClaw tool schema reference
@@ -27,7 +28,7 @@ AI-powered personal project memory with:
 ## Quick start
 
 1. Create `.env` from `.env.example`.
-2. Set `OPENAI_API_KEY` (optional; app still runs in heuristic mode).
+2. Set `OPENAI_API_KEY` (optional).
 3. Start web app:
 
 ```bash
@@ -44,13 +45,19 @@ Run:
 npm run start:mcp
 ```
 
-This exposes tools:
+Canonical tools:
 
 - `project_memory_search`
+- `project_memory_search_raw_content`
+- `project_memory_get_raw_content`
+- `project_memory_read_extracted_markdown`
 - `project_memory_save`
 - `project_memory_recent`
 - `project_memory_context`
 - `project_memory_ask`
+- `project_memory_tasks_list_open`
+
+Legacy aliases (`personio_*`) are still accepted for compatibility.
 
 Example Codex MCP config snippet:
 
@@ -73,28 +80,37 @@ Run a tool directly:
 node openclaw/bridge.js project_memory_search '{"query":"onboarding plan"}'
 ```
 
-The manifest at `openclaw/tools.manifest.json` describes tool schemas for plugin wiring.
+Manifest is at `openclaw/tools.manifest.json`.
 
 ## API endpoints
 
 - `GET /api/health`
 - `GET /api/notes?query=&project=&limit=`
-- `POST /api/notes` (body: `content`, `sourceType`, `sourceUrl`, `imageDataUrl`, `project`)
+- `POST /api/notes` (body: `content`, `sourceType`, `sourceUrl`, `imageDataUrl`, `fileDataUrl`, `fileName`, `fileMimeType`, `project`)
 - `POST /api/chat` (body: `question`, `project`, `limit`)
 - `POST /api/context` (body: `task`, `project`, `limit`)
 - `GET /api/projects`
 - `GET /api/recent?limit=`
+- `GET /api/tasks?status=open`
+- `POST /api/tasks` (body: `title`, `status`)
 
 ## Notes on input types
 
-- Responses API supports text/image/file inputs.
-- For this MVP, the web UI supports text/link/image capture.
-- URL content still requires app-side fetching/parsing if you want deep page understanding.
-- Image uploads are stored locally under `data/uploads/`.
+- UI supports text/link/image/file capture.
+- File/image uploads are sent as Data URLs and stored in note metadata.
+- With `OPENAI_API_KEY`, uploads are parsed into `raw_content` + `markdown_content`.
+- Without `OPENAI_API_KEY`, uploads still save, and text-like files use a local text extraction fallback.
+- Binary uploads are saved with metadata and can still be cited/search-ranked via note content/summary/project/tags.
+- Image binaries are stored under `data/uploads/`.
+
+## Helpful scripts
+
+- `npm run test:mcp-client`: MCP smoke test client
+- `npm run import:keep -- /path/to/Takeout`: import Google Keep JSON exports
 
 ## Demo flow
 
-1. Save a mix of note + link + screenshot.
+1. Save a mix of note + link + screenshot/file.
 2. Show auto summary/tags/project assignment.
-3. Ask a question in grounded chat and show citations.
-4. Call the same memory tools via MCP or OpenClaw bridge.
+3. Ask a grounded question and show citations.
+4. Call the same memory tools via MCP and OpenClaw.

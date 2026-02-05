@@ -17,10 +17,14 @@ node openclaw/bridge.js project_memory_search '{"query":"launch risks"}'
 ## Included tool names
 
 - `project_memory_search`
+- `project_memory_search_raw_content`
+- `project_memory_get_raw_content`
+- `project_memory_read_extracted_markdown`
 - `project_memory_save`
 - `project_memory_recent`
 - `project_memory_context`
 - `project_memory_ask`
+- `project_memory_tasks_list_open`
 
 ## Manifest
 

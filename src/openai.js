@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { config } from "./config.js";
+
+const execFileAsync = promisify(execFile);
 
 export function hasOpenAI() {
   return Boolean(config.openaiApiKey);
@@ -52,6 +59,53 @@ export function extractOutputText(payload) {
   }
 
   return chunks.join("\n").trim();
+}
+
+function parseJsonObject(text) {
+  if (!text) return null;
+  const trimmed = String(text).trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Invalid data URL");
+  }
+  return {
+    mime: match[1],
+    bytes: Buffer.from(match[2], "base64"),
+  };
+}
+
+function isUnsupportedFileError(error) {
+  const msg = error instanceof Error ? error.message : String(error || "");
+  return msg.includes("unsupported_file");
+}
+
+async function extractDocxTextViaTextutil(fileDataUrl, fileName) {
+  const { bytes } = parseDataUrl(fileDataUrl);
+  const safeName = path.basename(fileName || "upload.docx");
+  const tempPath = path.join(os.tmpdir(), `pm-${crypto.randomUUID()}-${safeName}`);
+  await fs.writeFile(tempPath, bytes);
+  try {
+    const { stdout } = await execFileAsync("textutil", ["-convert", "txt", "-stdout", tempPath], {
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return String(stdout || "").trim();
+  } finally {
+    await fs.rm(tempPath, { force: true }).catch(() => {});
+  }
 }
 
 export async function createResponse({ input, instructions, model = config.openaiChatModel, temperature = 0.2 }) {
@@ -110,6 +164,119 @@ export async function createEmbedding(input, model = config.openaiEmbeddingModel
     throw new Error("Embeddings API returned no vector");
   }
   return vector;
+}
+
+export async function convertUploadToMarkdown({
+  fileDataUrl,
+  fileName = "upload.bin",
+  fileMimeType = "application/octet-stream",
+}) {
+  if (!hasOpenAI()) {
+    throw new Error("OPENAI_API_KEY is required for file upload parsing");
+  }
+
+  const isImage = String(fileMimeType).toLowerCase().startsWith("image/");
+  const uploadPart = isImage
+    ? {
+        type: "input_image",
+        image_url: fileDataUrl,
+      }
+    : {
+        type: "input_file",
+        filename: fileName,
+        file_data: fileDataUrl,
+      };
+
+  const convertInstructions =
+    "Extract the uploaded file into markdown. Return JSON only with keys: rawContent (plain text extraction), markdownContent (well-structured markdown), summary (<=180 chars), tags (array of 3-8 short lowercase tags), project (2-4 words). Do not wrap in code fences.";
+
+  let rawContent = "";
+  let markdownContent = "";
+  let summary = "";
+  let tags = [];
+  let project = "";
+  try {
+    const { text } = await createResponse({
+      instructions: convertInstructions,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Convert this file to markdown.\nfile_name: ${fileName}\nfile_mime_type: ${fileMimeType}`,
+            },
+            uploadPart,
+          ],
+        },
+      ],
+      temperature: 0,
+    });
+
+    const parsed = parseJsonObject(text);
+    rawContent = typeof parsed?.rawContent === "string" ? parsed.rawContent.trim() : "";
+    markdownContent = typeof parsed?.markdownContent === "string" ? parsed.markdownContent.trim() : "";
+    summary = typeof parsed?.summary === "string" ? parsed.summary.trim() : "";
+    tags = Array.isArray(parsed?.tags)
+      ? parsed.tags
+          .map((tag) => String(tag).toLowerCase().trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    project = typeof parsed?.project === "string" ? parsed.project.trim() : "";
+  } catch (error) {
+    const isDocx =
+      fileMimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      fileMimeType === "application/msword" ||
+      /\.docx?$/i.test(fileName);
+    if (!isDocx || !isUnsupportedFileError(error)) {
+      throw error;
+    }
+
+    const extractedText = await extractDocxTextViaTextutil(fileDataUrl, fileName);
+    if (!extractedText) {
+      throw new Error("DOCX text extraction failed");
+    }
+
+    const { text } = await createResponse({
+      instructions: convertInstructions,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Convert this extracted document text to markdown.\nfile_name: ${fileName}\nfile_mime_type: ${fileMimeType}\n\n${extractedText}`,
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+    });
+    const parsed = parseJsonObject(text);
+    rawContent = typeof parsed?.rawContent === "string" ? parsed.rawContent.trim() : extractedText;
+    markdownContent = typeof parsed?.markdownContent === "string" ? parsed.markdownContent.trim() : extractedText;
+    summary = typeof parsed?.summary === "string" ? parsed.summary.trim() : "";
+    tags = Array.isArray(parsed?.tags)
+      ? parsed.tags
+          .map((tag) => String(tag).toLowerCase().trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    project = typeof parsed?.project === "string" ? parsed.project.trim() : "";
+  }
+
+  if (!rawContent && !markdownContent) {
+    throw new Error("Could not parse uploaded file into raw/markdown content");
+  }
+
+  return {
+    rawContent: rawContent || markdownContent,
+    markdownContent: markdownContent || rawContent,
+    summary,
+    tags,
+    project,
+  };
 }
 
 export function pseudoEmbedding(input, dims = 256) {

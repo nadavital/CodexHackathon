@@ -2,9 +2,13 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  getMemoryRawContent,
   listRecentMemories,
+  readExtractedMarkdownMemory,
+  searchRawMemories,
   searchMemories,
 } from "../src/memoryService.js";
+import { taskRepo } from "../src/tasksDb.js";
 
 async function run() {
   const [, , toolName, rawArgs] = process.argv;
@@ -33,11 +37,35 @@ async function run() {
           limit: Number(args.limit || 8),
         });
         break;
+      case "project_memory_search_raw_content":
+        result = await searchRawMemories({
+          query: String(args.query || ""),
+          project: String(args.project || ""),
+          includeMarkdown: args.includeMarkdown !== false,
+          limit: Number(args.limit || 8),
+        });
+        break;
+      case "project_memory_get_raw_content":
+        result = await getMemoryRawContent({
+          id: String(args.id || ""),
+          includeMarkdown: args.includeMarkdown !== false,
+          maxChars: Number(args.maxChars || 12000),
+        });
+        break;
+      case "project_memory_read_extracted_markdown":
+        result = await readExtractedMarkdownMemory({
+          filePath: String(args.filePath || ""),
+          maxChars: Number(args.maxChars || 30000),
+        });
+        break;
       case "project_memory_save":
         result = await createMemory({
           content: String(args.content || ""),
           sourceType: String(args.sourceType || "text"),
           sourceUrl: String(args.sourceUrl || ""),
+          fileDataUrl: String(args.fileDataUrl || ""),
+          fileName: String(args.fileName || ""),
+          fileMimeType: String(args.fileMimeType || ""),
           project: String(args.project || ""),
           metadata: { createdFrom: "openclaw" },
         });
@@ -58,6 +86,9 @@ async function run() {
           project: String(args.project || ""),
           limit: Number(args.limit || 6),
         });
+        break;
+      case "project_memory_tasks_list_open":
+        result = taskRepo.listOpenTasks();
         break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);
