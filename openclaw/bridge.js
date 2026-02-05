@@ -38,6 +38,9 @@ async function run() {
           content: String(args.content || ""),
           sourceType: String(args.sourceType || "text"),
           sourceUrl: String(args.sourceUrl || ""),
+          fileDataUrl: String(args.fileDataUrl || ""),
+          fileName: String(args.fileName || ""),
+          fileMimeType: String(args.fileMimeType || ""),
           project: String(args.project || ""),
           metadata: { createdFrom: "openclaw" },
         });

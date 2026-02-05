@@ -1,5 +1,7 @@
 const state = {
-  imageDataUrl: null,
+  fileDataUrl: null,
+  fileName: "",
+  fileMimeType: "",
   notes: [],
   loading: false,
 };
@@ -89,6 +91,7 @@ function renderNotes(items) {
 
     const meta = [];
     if (note.sourceType) meta.push(note.sourceType);
+    if (note.fileName) meta.push(note.fileName);
     if (note.sourceUrl) meta.push(note.sourceUrl);
     if (note.createdAt) meta.push(new Date(note.createdAt).toLocaleString());
     fragment.querySelector(".note-meta").textContent = meta.join(" • ");
@@ -160,7 +163,7 @@ async function initStatus() {
 function toggleCaptureFields() {
   const type = els.sourceType.value;
   els.sourceUrlWrap.classList.toggle("hidden", type !== "link");
-  els.imageWrap.classList.toggle("hidden", type !== "image");
+  els.imageWrap.classList.toggle("hidden", !["image", "file"].includes(type));
 }
 
 async function fileToDataUrl(file) {
@@ -174,18 +177,30 @@ async function fileToDataUrl(file) {
 
 els.sourceType.addEventListener("change", () => {
   toggleCaptureFields();
-  if (els.sourceType.value !== "image") {
-    state.imageDataUrl = null;
+  if (!["image", "file"].includes(els.sourceType.value)) {
+    state.fileDataUrl = null;
+    state.fileName = "";
+    state.fileMimeType = "";
     els.imagePreview.classList.add("hidden");
+    els.imagePreview.removeAttribute("src");
+    els.imageInput.value = "";
   }
 });
 
 els.imageInput.addEventListener("change", async () => {
   const file = els.imageInput.files?.[0];
   if (!file) return;
-  state.imageDataUrl = await fileToDataUrl(file);
-  els.imagePreview.src = state.imageDataUrl;
-  els.imagePreview.classList.remove("hidden");
+  state.fileDataUrl = await fileToDataUrl(file);
+  state.fileName = file.name || "";
+  state.fileMimeType = file.type || "";
+
+  if ((file.type || "").startsWith("image/")) {
+    els.imagePreview.src = state.fileDataUrl;
+    els.imagePreview.classList.remove("hidden");
+  } else {
+    els.imagePreview.classList.add("hidden");
+    els.imagePreview.removeAttribute("src");
+  }
 });
 
 els.captureForm.addEventListener("submit", async (event) => {
@@ -197,7 +212,10 @@ els.captureForm.addEventListener("submit", async (event) => {
     content: els.contentInput.value,
     sourceUrl: els.sourceUrlInput.value,
     project: els.projectInput.value,
-    imageDataUrl: state.imageDataUrl,
+    imageDataUrl: els.sourceType.value === "image" ? state.fileDataUrl : null,
+    fileDataUrl: state.fileDataUrl,
+    fileName: state.fileName,
+    fileMimeType: state.fileMimeType,
   };
 
   state.loading = true;
@@ -213,8 +231,11 @@ els.captureForm.addEventListener("submit", async (event) => {
     els.contentInput.value = "";
     els.sourceUrlInput.value = "";
     els.imageInput.value = "";
-    state.imageDataUrl = null;
+    state.fileDataUrl = null;
+    state.fileName = "";
+    state.fileMimeType = "";
     els.imagePreview.classList.add("hidden");
+    els.imagePreview.removeAttribute("src");
 
     await refreshNotes();
   } catch (error) {

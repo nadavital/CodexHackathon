@@ -4,6 +4,7 @@ import path from "node:path";
 import { config, publicUploadPath } from "./config.js";
 import { noteRepo } from "./db.js";
 import {
+  convertUploadToMarkdown,
   createEmbedding,
   createResponse,
   hasOpenAI,
@@ -13,7 +14,7 @@ import {
   heuristicTags,
 } from "./openai.js";
 
-const SOURCE_TYPES = new Set(["text", "link", "image"]);
+const SOURCE_TYPES = new Set(["text", "link", "image", "file"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -112,6 +113,7 @@ function parseDataUrl(dataUrl) {
   return {
     mime: match[1],
     base64: match[2],
+    bytes: Buffer.from(match[2], "base64"),
   };
 }
 
@@ -131,8 +133,7 @@ function mimeToExt(mime) {
 }
 
 async function saveImageDataUrl(dataUrl) {
-  const { mime, base64 } = parseDataUrl(dataUrl);
-  const bytes = Buffer.from(base64, "base64");
+  const { mime, bytes } = parseDataUrl(dataUrl);
   const extension = mimeToExt(mime);
   const fileName = `${crypto.randomUUID()}.${extension}`;
   const absolutePath = path.join(config.uploadDir, fileName);
@@ -144,6 +145,18 @@ async function saveImageDataUrl(dataUrl) {
     imageAbsolutePath: absolutePath,
     imageMime: mime,
     imageSize: bytes.length,
+  };
+}
+
+function parseGenericDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([a-zA-Z0-9/+.-]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Invalid file data URL");
+  }
+  return {
+    mime: match[1],
+    base64: match[2],
+    bytes: Buffer.from(match[2], "base64"),
   };
 }
 
@@ -165,6 +178,10 @@ async function imagePathToDataUrl(imagePath) {
 function noteTextForEmbedding(note, linkPreview) {
   const parts = [
     note.content || "",
+    note.rawContent || "",
+    note.markdownContent || "",
+    note.fileName || "",
+    note.fileMime || "",
     note.summary || "",
     Array.isArray(note.tags) ? note.tags.join(" ") : "",
     note.project || "",
@@ -185,7 +202,11 @@ function tokenize(text) {
 
 function lexicalScore(note, queryTokens) {
   if (queryTokens.length === 0) return 0;
-  const noteTokens = new Set(tokenize(`${note.content} ${note.summary} ${(note.tags || []).join(" ")} ${note.project || ""}`));
+  const noteTokens = new Set(
+    tokenize(
+      `${note.content} ${note.rawContent || ""} ${note.markdownContent || ""} ${note.summary} ${(note.tags || []).join(" ")} ${note.project || ""} ${note.fileName || ""}`
+    )
+  );
   let overlap = 0;
   for (const token of queryTokens) {
     if (noteTokens.has(token)) {
@@ -213,7 +234,11 @@ async function buildEnrichment(note, linkPreview = null) {
     const userText = [
       `source_type: ${note.sourceType}`,
       note.sourceUrl ? `source_url: ${note.sourceUrl}` : "",
+      note.fileName ? `file_name: ${note.fileName}` : "",
+      note.fileMime ? `file_mime: ${note.fileMime}` : "",
       note.content ? `content:\n${note.content}` : "",
+      note.rawContent ? `raw_content:\n${note.rawContent.slice(0, 8000)}` : "",
+      note.markdownContent ? `markdown_content:\n${note.markdownContent.slice(0, 8000)}` : "",
       linkPreview?.title ? `link_title: ${linkPreview.title}` : "",
       linkPreview?.excerpt ? `link_excerpt: ${linkPreview.excerpt}` : "",
     ]
@@ -279,6 +304,11 @@ function materializeCitation(note, score, rank) {
       sourceType: note.sourceType,
       sourceUrl: note.sourceUrl,
       imagePath: note.imagePath,
+      fileName: note.fileName,
+      fileMime: note.fileMime,
+      fileSize: note.fileSize,
+      rawContent: note.rawContent,
+      markdownContent: note.markdownContent,
       summary: note.summary,
       tags: note.tags || [],
       project: note.project,
@@ -288,21 +318,68 @@ function materializeCitation(note, score, rank) {
   };
 }
 
-export async function createMemory({ content = "", sourceType = "text", sourceUrl = "", imageDataUrl = null, project = "", metadata = {} }) {
-  const normalizedSourceType = normalizeSourceType(sourceType);
+export async function createMemory({
+  content = "",
+  sourceType = "text",
+  sourceUrl = "",
+  imageDataUrl = null,
+  fileDataUrl = null,
+  fileName = "",
+  fileMimeType = "",
+  project = "",
+  metadata = {},
+}) {
+  const requestedSourceType = normalizeSourceType(sourceType);
   const normalizedSourceUrl = String(sourceUrl || "").trim();
   let normalizedContent = String(content || "").trim();
+  const normalizedFileDataUrl = String(fileDataUrl || imageDataUrl || "").trim() || null;
+  const normalizedFileName = String(fileName || "").trim();
+  const normalizedFileMimeType = String(fileMimeType || "").trim().toLowerCase();
+
+  let uploadMime = normalizedFileMimeType || null;
+  let uploadSize = null;
+  if (normalizedFileDataUrl) {
+    const parsedData = parseGenericDataUrl(normalizedFileDataUrl);
+    uploadMime = uploadMime || parsedData.mime;
+    uploadSize = parsedData.bytes.length;
+  }
+
+  const normalizedSourceType =
+    normalizedFileDataUrl && uploadMime
+      ? uploadMime.startsWith("image/")
+        ? "image"
+        : "file"
+      : requestedSourceType;
 
   if (!normalizedContent && normalizedSourceUrl) {
     normalizedContent = normalizedSourceUrl;
   }
 
   let imageData = null;
-  if (imageDataUrl) {
-    imageData = await saveImageDataUrl(imageDataUrl);
+  if (normalizedFileDataUrl && uploadMime?.startsWith("image/")) {
+    imageData = await saveImageDataUrl(normalizedFileDataUrl);
   }
 
-  if (!normalizedContent && !imageData) {
+  let rawContent = null;
+  let markdownContent = null;
+  if (normalizedFileDataUrl) {
+    const parsedUpload = await convertUploadToMarkdown({
+      fileDataUrl: normalizedFileDataUrl,
+      fileName: normalizedFileName || `upload.${uploadMime?.split("/")[1] || "bin"}`,
+      fileMimeType: uploadMime || "application/octet-stream",
+    });
+    rawContent = parsedUpload.rawContent || null;
+    markdownContent = parsedUpload.markdownContent || null;
+  }
+
+  if (!normalizedContent && markdownContent) {
+    normalizedContent = markdownContent.slice(0, 12000).trim();
+  }
+  if (!normalizedContent && rawContent) {
+    normalizedContent = rawContent.slice(0, 12000).trim();
+  }
+
+  if (!normalizedContent && !normalizedFileDataUrl && !imageData) {
     throw new Error("Missing content");
   }
 
@@ -317,6 +394,11 @@ export async function createMemory({ content = "", sourceType = "text", sourceUr
     sourceType: normalizedSourceType,
     sourceUrl: normalizedSourceUrl || null,
     imagePath: imageData?.imagePath || null,
+    fileName: normalizedFileName || null,
+    fileMime: uploadMime || null,
+    fileSize: uploadSize,
+    rawContent,
+    markdownContent,
     summary: heuristicSummary(normalizedContent),
     tags: seedTags,
     project: project || null,
@@ -327,6 +409,8 @@ export async function createMemory({ content = "", sourceType = "text", sourceUr
       ...metadata,
       imageMime: imageData?.imageMime || null,
       imageSize: imageData?.imageSize || null,
+      fileMime: uploadMime || null,
+      fileSize: uploadSize,
       linkTitle: linkPreview?.title || null,
     },
   });

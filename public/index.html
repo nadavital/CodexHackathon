@@ -30,6 +30,7 @@
                 <option value="text">Text</option>
                 <option value="link">Link</option>
                 <option value="image">Image</option>
+                <option value="file">File (PDF, DOCX, etc.)</option>
               </select>
             </label>
 
@@ -49,8 +50,8 @@
             </label>
 
             <label id="image-wrap" class="hidden file-input-wrap">
-              Image
-              <input id="image-input" type="file" accept="image/*" />
+              Upload file
+              <input id="image-input" type="file" accept="image/*,.pdf,.doc,.docx,.txt,.md,.rtf,.csv,.json,.xml,.html,.ppt,.pptx,.xls,.xlsx" />
               <img id="image-preview" alt="image preview" class="image-preview hidden" />
             </label>
 

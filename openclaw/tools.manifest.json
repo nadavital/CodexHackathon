@@ -27,9 +27,11 @@
           "content": { "type": "string" },
           "sourceType": { "type": "string" },
           "sourceUrl": { "type": "string" },
+          "fileDataUrl": { "type": "string" },
+          "fileName": { "type": "string" },
+          "fileMimeType": { "type": "string" },
           "project": { "type": "string" }
-        },
-        "required": ["content"]
+        }
       }
     },
     {

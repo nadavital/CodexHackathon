@@ -46,7 +46,10 @@ function parsePort(value, fallback) {
 
 export const config = {
   port: parsePort(process.env.PORT, 8787),
-  openaiApiKey: process.env.OPENAI_API_KEY || "",
+  openaiApiKey:
+    process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
+      ? process.env.OPENAI_API_KEY
+      : "",
   openaiBaseUrl: (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, ""),
   openaiChatModel: process.env.OPENAI_CHAT_MODEL || "gpt-4.1-mini",
   openaiEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",

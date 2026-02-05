@@ -27,16 +27,18 @@ const TOOL_DEFS = [
   },
   {
     name: "project_memory_save",
-    description: "Save a new memory note/link/image metadata.",
+    description: "Save a new memory note/link/upload metadata.",
     inputSchema: {
       type: "object",
       properties: {
         content: { type: "string", description: "Note content" },
-        sourceType: { type: "string", enum: ["text", "link", "image"], default: "text" },
+        sourceType: { type: "string", enum: ["text", "link", "image", "file"], default: "text" },
         sourceUrl: { type: "string", description: "Source URL for link captures" },
+        fileDataUrl: { type: "string", description: "Optional data URL for uploaded file bytes" },
+        fileName: { type: "string", description: "Uploaded file name" },
+        fileMimeType: { type: "string", description: "Uploaded file MIME type" },
         project: { type: "string", description: "Optional project label" },
       },
-      required: ["content"],
       additionalProperties: false,
     },
   },
@@ -122,6 +124,9 @@ async function callTool(name, args = {}) {
         content: String(args.content || ""),
         sourceType: String(args.sourceType || "text"),
         sourceUrl: String(args.sourceUrl || ""),
+        fileDataUrl: String(args.fileDataUrl || ""),
+        fileName: String(args.fileName || ""),
+        fileMimeType: String(args.fileMimeType || ""),
         project: String(args.project || ""),
         metadata: { createdFrom: "mcp" },
       });

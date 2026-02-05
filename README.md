@@ -79,7 +79,7 @@ The manifest at `openclaw/tools.manifest.json` describes tool schemas for plugin
 
 - `GET /api/health`
 - `GET /api/notes?query=&project=&limit=`
-- `POST /api/notes` (body: `content`, `sourceType`, `sourceUrl`, `imageDataUrl`, `project`)
+- `POST /api/notes` (body: `content`, `sourceType`, `sourceUrl`, `imageDataUrl`, `fileDataUrl`, `fileName`, `fileMimeType`, `project`)
 - `POST /api/chat` (body: `question`, `project`, `limit`)
 - `POST /api/context` (body: `task`, `project`, `limit`)
 - `GET /api/projects`
@@ -88,9 +88,14 @@ The manifest at `openclaw/tools.manifest.json` describes tool schemas for plugin
 ## Notes on input types
 
 - Responses API supports text/image/file inputs.
-- For this MVP, the web UI supports text/link/image capture.
+- The web UI supports text/link plus file uploads (images, PDF, DOCX, and other common office/text formats).
+- Every upload is parsed through the OpenAI Responses API into:
+  - `raw_content` (plain extraction)
+  - `markdown_content` (structured markdown)
+  Both are stored in the same SQLite `notes` table.
 - URL content still requires app-side fetching/parsing if you want deep page understanding.
 - Image uploads are stored locally under `data/uploads/`.
+- Upload parsing requires a real `OPENAI_API_KEY` (heuristic mode does not process uploaded files).
 
 ## Demo flow
 

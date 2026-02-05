@@ -155,6 +155,9 @@ async function handleApi(req, res, url) {
       sourceType: body.sourceType,
       sourceUrl: body.sourceUrl,
       imageDataUrl: body.imageDataUrl,
+      fileDataUrl: body.fileDataUrl,
+      fileName: body.fileName,
+      fileMimeType: body.fileMimeType,
       project: body.project,
       metadata: {
         createdFrom: "web-app",
