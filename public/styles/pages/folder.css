@@ -1,5 +1,5 @@
 .page-folder {
-  gap: 14px;
+  gap: var(--space-5);
 }
 
 .folder-hero-toolbar-card,
@@ -11,37 +11,56 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .folder-tab-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 .folder-tab-row .btn {
   width: auto;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-weight: 500;
 }
 
 .folder-items-grid {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .folder-item-card {
-  min-height: 108px;
+  min-height: 110px;
 }
 
 .page-folder .composer-shell {
-  min-height: auto;
+  position: sticky;
+  bottom: 12px;
+  z-index: 12;
 }
 
-@media (max-width: 640px) {
+.page-folder .composer-form {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+@media (max-width: 900px) {
   .folder-hero-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .page-folder .composer-shell {
+    position: static;
+  }
+
+  .page-folder .composer-form {
+    max-width: none;
+    margin: 0;
   }
 }

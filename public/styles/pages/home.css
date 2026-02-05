@@ -1,93 +1,94 @@
 .page-home {
-  gap: 18px;
+  gap: var(--space-6);
 }
 
 .home-grid {
   display: grid;
-  grid-template-columns: 1fr 1.4fr 1.1fr;
-  gap: 16px;
+  grid-template-columns: minmax(230px, 1fr) minmax(420px, 1.35fr) minmax(290px, 1.05fr);
+  gap: var(--space-4);
+  align-items: start;
 }
 
 .home-folder-grid-card,
 .stream-card,
 .chat-card {
-  min-height: 280px;
+  min-height: 320px;
 }
 
 .home-folders-list {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
 .folder-pill {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px;
+  border-radius: var(--radius-md);
+  padding: 11px;
   text-decoration: none;
   color: inherit;
-  background: rgba(255, 255, 255, 0.82);
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  transition: border-color 140ms ease, transform 140ms ease;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .folder-pill:hover {
-  border-color: rgba(10, 111, 77, 0.35);
-  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.34);
+  box-shadow: var(--shadow-1);
 }
 
 .folder-pill-name {
   font-weight: 600;
+  color: var(--ink);
 }
 
 .folder-pill-count {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--muted);
 }
 
-.composer-shell {
-  min-height: auto;
+.page-home .composer-shell {
+  position: sticky;
+  bottom: 12px;
+  z-index: 12;
 }
 
-.composer-form {
-  display: grid;
-  gap: 8px;
+.page-home .composer-form {
+  max-width: 980px;
+  margin: 0 auto;
 }
 
-.composer-row {
-  display: grid;
-  grid-template-columns: auto 1fr 2fr auto;
-  align-items: center;
-  gap: 8px;
+@media (max-width: 1180px) {
+  .home-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .chat-card {
+    grid-column: 1 / -1;
+  }
 }
 
-.composer-plus {
-  width: 42px;
-  min-width: 42px;
-  padding: 10px 0;
-  font-size: 18px;
-}
-
-.composer-row input {
-  margin-top: 0;
-}
-
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .home-grid {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 780px) {
-  .composer-row {
-    grid-template-columns: 1fr;
+  .home-folder-grid-card,
+  .stream-card,
+  .chat-card {
+    min-height: auto;
   }
 
-  .composer-plus {
-    width: 100%;
+  .page-home .composer-shell {
+    position: static;
+  }
+
+  .page-home .composer-form {
+    max-width: none;
+    margin: 0;
   }
 }
