@@ -211,6 +211,70 @@ function tokenize(text) {
     .filter(Boolean);
 }
 
+function buildBm25Index(docs, textSelector) {
+  const docTokens = docs.map((doc) => tokenize(textSelector(doc)));
+  const docLengths = docTokens.map((tokens) => tokens.length);
+  const avgDocLength = docLengths.length ? docLengths.reduce((sum, len) => sum + len, 0) / docLengths.length : 0;
+
+  const termFreqs = docTokens.map((tokens) => {
+    const tf = new Map();
+    for (const token of tokens) {
+      tf.set(token, (tf.get(token) || 0) + 1);
+    }
+    return tf;
+  });
+
+  const docFreq = new Map();
+  for (const tf of termFreqs) {
+    for (const token of tf.keys()) {
+      docFreq.set(token, (docFreq.get(token) || 0) + 1);
+    }
+  }
+
+  return {
+    N: docs.length,
+    avgDocLength: avgDocLength || 1,
+    docLengths,
+    termFreqs,
+    docFreq,
+  };
+}
+
+function bm25ScoreFromIndex(index, docIndex, queryTokens, k1 = 1.2, b = 0.75) {
+  const tf = index.termFreqs[docIndex];
+  const docLen = index.docLengths[docIndex] || 0;
+  if (!tf || !queryTokens.length || !docLen) return 0;
+
+  let score = 0;
+  const uniqueQueryTerms = new Set(queryTokens);
+  for (const token of uniqueQueryTerms) {
+    const f = tf.get(token) || 0;
+    if (!f) continue;
+
+    const n = index.docFreq.get(token) || 0;
+    const idf = Math.log(1 + (index.N - n + 0.5) / (n + 0.5));
+    const denom = f + k1 * (1 - b + (b * docLen) / index.avgDocLength);
+    score += idf * ((f * (k1 + 1)) / (denom || 1));
+  }
+
+  return Number.isFinite(score) ? score : 0;
+}
+
+function normalizeScores(items, scoreSelector) {
+  if (!items.length) return new Map();
+  let max = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    max = Math.max(max, Number(scoreSelector(item)) || 0);
+  }
+  const divisor = max > 0 ? max : 1;
+  const out = new Map();
+  for (const item of items) {
+    const value = Number(scoreSelector(item)) || 0;
+    out.set(item, value / divisor);
+  }
+  return out;
+}
+
 function lexicalScore(note, queryTokens) {
   if (queryTokens.length === 0) return 0;
   const noteTokens = new Set(
@@ -631,16 +695,14 @@ export async function searchRawMemories({ query = "", project = "", limit = 8, i
 
   const boundedLimit = clampInt(limit, 1, 100, 8);
   const normalizedProject = String(project || "").trim();
-  const directMatches = noteRepo.searchNotes(normalizedQuery, {
-    project: normalizedProject || null,
-    limit: boundedLimit * 4,
-  });
-
+  const candidates = noteRepo.listByProject(normalizedProject || null, 500);
   const tokenizedQuery = tokenize(normalizedQuery);
-  const ranked = directMatches
-    .map((note) => {
+  const bm25Index = buildBm25Index(candidates, (note) => `${note.rawContent || ""}\n${note.markdownContent || ""}\n${note.content || ""}`);
+  const scored = candidates
+    .map((note, docIndex) => {
       const searchableText = `${note.rawContent || ""}\n${note.markdownContent || ""}\n${note.content || ""}`;
-      const score = lexicalScore(
+      const bm25 = bm25ScoreFromIndex(bm25Index, docIndex, tokenizedQuery);
+      const lexical = lexicalScore(
         {
           ...note,
           content: searchableText,
@@ -649,8 +711,17 @@ export async function searchRawMemories({ query = "", project = "", limit = 8, i
         },
         tokenizedQuery
       );
-      return { note, score };
+      const phraseBoost = searchableText.toLowerCase().includes(normalizedQuery.toLowerCase()) ? 0.15 : 0;
+      const score = bm25 * 0.85 + lexical * 0.15 + phraseBoost;
+      return { note, score, bm25, lexical };
     })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, boundedLimit * 3);
+
+  const normalized = normalizeScores(scored, (entry) => entry.score);
+  const ranked = scored
+    .map((entry) => ({ ...entry, score: normalized.get(entry) || 0 }))
     .sort((a, b) => b.score - a.score)
     .slice(0, boundedLimit)
     .map((entry, index) => ({
@@ -718,6 +789,11 @@ export async function searchMemories({ query = "", project = "", limit = 15 } = 
   if (notes.length === 0) return [];
 
   const queryTokens = tokenize(normalizedQuery);
+  const bm25Index = buildBm25Index(
+    notes,
+    (note) =>
+      `${note.content || ""}\n${note.rawContent || ""}\n${note.markdownContent || ""}\n${note.summary || ""}\n${(note.tags || []).join(" ")}\n${note.project || ""}\n${note.fileName || ""}`
+  );
   let queryEmbedding;
   try {
     queryEmbedding = await createEmbedding(normalizedQuery);
@@ -725,17 +801,31 @@ export async function searchMemories({ query = "", project = "", limit = 15 } = 
     queryEmbedding = pseudoEmbedding(normalizedQuery);
   }
 
-  const ranked = notes.map((note) => {
+  const ranked = notes.map((note, docIndex) => {
     const noteEmbedding = Array.isArray(note.embedding) ? note.embedding : pseudoEmbedding(`${note.content}\n${note.summary}`);
     const semantic = cosineSimilarity(queryEmbedding, noteEmbedding);
     const lexical = lexicalScore(note, queryTokens);
+    const bm25 = bm25ScoreFromIndex(bm25Index, docIndex, queryTokens);
+    const phraseBoost = `${note.content || ""}\n${note.rawContent || ""}\n${note.markdownContent || ""}`.toLowerCase().includes(normalizedQuery.toLowerCase()) ? 0.05 : 0;
     const freshnessBoost = Math.max(0, 1 - (Date.now() - new Date(note.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 30)) * 0.05;
-    const score = semantic * 0.82 + lexical * 0.13 + freshnessBoost;
-    return { note, score };
+    return { note, semantic, lexical, bm25, phraseBoost, freshnessBoost };
   });
 
-  ranked.sort((a, b) => b.score - a.score);
-  return ranked.slice(0, boundedLimit).map((item, index) => materializeCitation(item.note, item.score, index + 1));
+  const semanticNormalized = normalizeScores(ranked, (item) => item.semantic);
+  const bm25Normalized = normalizeScores(ranked, (item) => item.bm25);
+
+  const combined = ranked.map((item) => ({
+    ...item,
+    score:
+      (semanticNormalized.get(item) || 0) * 0.3 +
+      (bm25Normalized.get(item) || 0) * 0.5 +
+      item.lexical * 0.15 +
+      item.phraseBoost +
+      item.freshnessBoost * 0.4,
+  }));
+
+  combined.sort((a, b) => b.score - a.score);
+  return combined.slice(0, boundedLimit).map((item, index) => materializeCitation(item.note, item.score, index + 1));
 }
 
 function buildCitationBlock(citations) {
