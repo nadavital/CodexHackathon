@@ -1,0 +1,72 @@
+{
+  "name": "project-memory-tools",
+  "version": "0.1.0",
+  "description": "OpenClaw command tools backed by local Project Memory database",
+  "command": "node",
+  "args": ["openclaw/bridge.js"],
+  "tools": [
+    {
+      "name": "project_memory_search",
+      "description": "Search memories",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "project": { "type": "string" },
+          "limit": { "type": "number" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "project_memory_save",
+      "description": "Save a memory",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" },
+          "sourceType": { "type": "string" },
+          "sourceUrl": { "type": "string" },
+          "project": { "type": "string" }
+        },
+        "required": ["content"]
+      }
+    },
+    {
+      "name": "project_memory_recent",
+      "description": "List recent memories",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "project_memory_context",
+      "description": "Generate context brief",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string" },
+          "project": { "type": "string" },
+          "limit": { "type": "number" }
+        },
+        "required": ["task"]
+      }
+    },
+    {
+      "name": "project_memory_ask",
+      "description": "Ask grounded question",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "question": { "type": "string" },
+          "project": { "type": "string" },
+          "limit": { "type": "number" }
+        },
+        "required": ["question"]
+      }
+    }
+  ]
+}
