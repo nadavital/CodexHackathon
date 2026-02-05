@@ -1,5 +1,6 @@
 node_modules
 .env
-data/*.db
-data/uploads/*
+data/**
+!data/.gitkeep
+!data/uploads/
 !data/uploads/.gitkeep
