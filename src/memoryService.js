@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config, publicUploadPath } from "./config.js";
-import { noteRepo } from "./db.js";
+import { noteRepo, projectMemoryRepo } from "./db.js";
 import {
   createEmbedding,
   createResponse,
@@ -14,9 +14,35 @@ import {
 } from "./openai.js";
 
 const SOURCE_TYPES = new Set(["text", "link", "image"]);
+const EXTRACTOR_MODEL = "openai/gpt-5.1";
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function normalizeExternalSourceId(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^ext:/i, "");
+  return normalized ? normalized.toLowerCase() : "";
+}
+
+function buildSourceId({ normalizedFilename, externalSourceId }) {
+  const normalizedExternalSourceId = normalizeExternalSourceId(externalSourceId);
+  if (normalizedExternalSourceId) {
+    return {
+      sourceId: `ext:${normalizedExternalSourceId}`,
+      normalizedExternalSourceId,
+      sourceIdStrategy: "external_source_id",
+    };
+  }
+
+  return {
+    sourceId: crypto.createHash("sha256").update(normalizedFilename, "utf8").digest("hex"),
+    normalizedExternalSourceId: "",
+    sourceIdStrategy: "filename_hash",
+  };
 }
 
 function clampInt(value, min, max, fallback) {
@@ -542,4 +568,688 @@ export async function buildProjectContext({ task, project = "", limit = 8 }) {
       mode: "fallback",
     };
   }
+}
+
+export async function ingestProcessedMarkdown({
+  filename,
+  markdown,
+  sourcePath = "",
+  externalSourceId = "",
+  metadata = {},
+  agentfsUri = null,
+}) {
+  const normalizedFilename = String(filename || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .toLowerCase();
+
+  const { sourceId, normalizedExternalSourceId, sourceIdStrategy } = buildSourceId({
+    normalizedFilename,
+    externalSourceId,
+  });
+
+  if (!normalizedFilename && !normalizedExternalSourceId) {
+    throw new Error("Missing filename or externalSourceId");
+  }
+
+  const strictMarkdown = String(markdown || "").replace(/\r\n/g, "\n");
+  if (!strictMarkdown.trim()) {
+    throw new Error("Missing markdown");
+  }
+
+  const fuzzyMarkdown = strictMarkdown
+    .toLowerCase()
+    .replace(/[\t ]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const checksum = crypto.createHash("sha256").update(strictMarkdown, "utf8").digest("hex");
+  const fuzzyHash = crypto.createHash("sha256").update(fuzzyMarkdown, "utf8").digest("hex");
+  const createdAt = nowIso();
+
+  const source = projectMemoryRepo.upsertSource({
+    sourceId,
+    sourceFilename: normalizedFilename ? path.basename(normalizedFilename) : normalizedExternalSourceId,
+    sourcePath: sourcePath || normalizedFilename || null,
+    sourceKind: "markdown",
+    checksum,
+    seenAt: createdAt,
+    metadata: {
+      ...metadata,
+      ingestionMethod: "pipeline",
+      sourceIdStrategy,
+      externalSourceId: normalizedExternalSourceId || null,
+    },
+  });
+
+  const versionResult = projectMemoryRepo.createVersionIfChanged({
+    sourceId,
+    checksum,
+    fuzzyHash,
+    contentMarkdown: strictMarkdown,
+    agentfsUri,
+    contentBytes: Buffer.byteLength(strictMarkdown, "utf8"),
+    createdAt,
+    metadata: {
+      ...metadata,
+      ingestedAt: createdAt,
+    },
+  });
+
+  const existingForSource = projectMemoryRepo.listMemoryRecordsBySource(sourceId);
+  const existingExtracted = existingForSource.filter((row) => isExtractedAtomicMemory(row));
+  const hasLegacyDocumentMemory = existingForSource.some((row) => row.memoryId === sourceId);
+  if (!versionResult.changed && existingExtracted.length > 0 && !hasLegacyDocumentMemory) {
+    return {
+      source,
+      memory: existingExtracted[0],
+      extractedMemories: existingExtracted,
+      extractedCount: existingExtracted.length,
+      extractionRunId: null,
+      version: versionResult.row,
+      changed: versionResult.changed,
+      extractionSkipped: true,
+    };
+  }
+
+  const extractionRunStartedAt = nowIso();
+  const extractionRunId = projectMemoryRepo.startExtractionRun({
+    sourceId,
+    sourceVersion: versionResult.version,
+    model: EXTRACTOR_MODEL,
+    startedAt: extractionRunStartedAt,
+    metadata: {
+      sourceFilename: source.sourceFilename,
+      sourceIdStrategy,
+      externalSourceId: normalizedExternalSourceId || null,
+      changed: versionResult.changed,
+    },
+  });
+
+  let extraction;
+  try {
+    const extractedByAgent = await extractAtomicMemoriesViaAgent({
+      sourceId,
+      sourceFilename: source.sourceFilename,
+      sourceVersion: versionResult.version,
+      markdown: strictMarkdown,
+    });
+
+    extraction = await applyExtractedMemories({
+      sourceId,
+      sourceVersion: versionResult.version,
+      extractedMemories: extractedByAgent,
+      allowEmpty: false,
+      metadata: {
+        ...metadata,
+        sourceIdStrategy,
+        externalSourceId: normalizedExternalSourceId || null,
+      },
+    });
+
+    projectMemoryRepo.finishExtractionRun({
+      runId: extractionRunId,
+      status: "success",
+      finishedAt: nowIso(),
+      extractedCount: extraction.extractedCount,
+      metadata: {
+        sourceFilename: source.sourceFilename,
+      },
+    });
+  } catch (error) {
+    projectMemoryRepo.finishExtractionRun({
+      runId: extractionRunId,
+      status: "failed",
+      finishedAt: nowIso(),
+      extractedCount: 0,
+      errorText: error instanceof Error ? error.message : String(error),
+      metadata: {
+        sourceFilename: source.sourceFilename,
+      },
+    });
+    throw error;
+  }
+
+  return {
+    source,
+    memory: extraction.extractedMemories[0] || null,
+    extractedMemories: extraction.extractedMemories,
+    extractedCount: extraction.extractedCount,
+    extractionRunId,
+    version: versionResult.row,
+    changed: versionResult.changed,
+  };
+}
+
+export async function listMemoryRecords(limit = 50) {
+  return projectMemoryRepo.listMemoryRecords(clampInt(limit, 1, 500, 50));
+}
+
+export async function runMemoryJob(jobName, handler, metadata = {}) {
+  const normalizedJobName = String(jobName || "").trim();
+  if (!normalizedJobName) {
+    throw new Error("Missing job name");
+  }
+
+  const startedAt = nowIso();
+  const runId = projectMemoryRepo.startJobRun({
+    jobName: normalizedJobName,
+    startedAt,
+    metadata,
+  });
+
+  try {
+    const result = await handler();
+    const finishedAt = nowIso();
+    const processedCount = Number(result?.processedCount || 0);
+    projectMemoryRepo.finishJobRun({
+      runId,
+      jobName: normalizedJobName,
+      finishedAt,
+      status: "success",
+      processedCount: Number.isFinite(processedCount) ? processedCount : 0,
+      metadata: {
+        ...metadata,
+        resultSummary: result?.summary || null,
+      },
+    });
+    return result;
+  } catch (error) {
+    const finishedAt = nowIso();
+    projectMemoryRepo.finishJobRun({
+      runId,
+      jobName: normalizedJobName,
+      finishedAt,
+      status: "failed",
+      processedCount: 0,
+      errorText: error instanceof Error ? error.message : String(error),
+      metadata,
+    });
+    throw error;
+  }
+}
+
+function detectTopLevelBucket(memory) {
+  const text = `${memory.effectiveSummary || ""} ${(memory.effectiveTags || []).join(" ")}`.toLowerCase();
+  if (text.includes("meeting") || text.includes("appointment") || text.includes("schedule")) return "events";
+  if (text.includes("todo") || text.includes("follow up") || text.includes("deadline") || text.includes("task")) return "commitments";
+  if (text.includes("decide") || text.includes("decision") || text.includes("chose") || text.includes("because")) return "decisions";
+  if (text.includes("preference") || text.includes("prefer") || text.includes("style") || text.includes("favorite")) return "preferences";
+  if (text.includes("contact") || text.includes("person") || text.includes("teammate") || text.includes("client")) return "people";
+  if (text.includes("http") || text.includes("file") || text.includes("reference") || text.includes("resource")) return "resources";
+  if (text.trim()) return "knowledge";
+  return "inbox";
+}
+
+function tagOverlapScore(a, b) {
+  const left = new Set(a || []);
+  const right = new Set(b || []);
+  if (!left.size || !right.size) return 0;
+  let overlap = 0;
+  for (const token of left) {
+    if (right.has(token)) overlap += 1;
+  }
+  return overlap / Math.max(left.size, right.size);
+}
+
+const CATEGORY_ID_BY_SLUG = {
+  preferences: "cat_preferences",
+  people: "cat_people",
+  commitments: "cat_commitments",
+  decisions: "cat_decisions",
+  knowledge: "cat_knowledge",
+  resources: "cat_resources",
+  events: "cat_events",
+  inbox: "cat_inbox",
+};
+
+function categoryIdForBucket(bucket) {
+  return CATEGORY_ID_BY_SLUG[String(bucket || "").toLowerCase()] || CATEGORY_ID_BY_SLUG.inbox;
+}
+
+function normalizeSentence(text, maxLen = 280) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLen);
+}
+
+function findCitationOffsets(markdown, evidenceText, statement) {
+  const baseText = String(markdown || "");
+  const target = String(evidenceText || statement || "").trim();
+  if (!target) return { startOffset: null, endOffset: null };
+  const idx = baseText.toLowerCase().indexOf(target.toLowerCase());
+  if (idx === -1) return { startOffset: null, endOffset: null };
+  return {
+    startOffset: idx,
+    endOffset: idx + target.length,
+  };
+}
+
+function extractionFingerprint(kind, statement) {
+  const stable = `${String(kind || "").toLowerCase()}|${normalizeSentence(statement, 500).toLowerCase()}`;
+  return crypto.createHash("sha256").update(stable, "utf8").digest("hex");
+}
+
+function extractedMemoryId(sourceId, fingerprint) {
+  const stable = `${sourceId}|${fingerprint}`;
+  return crypto.createHash("sha256").update(stable, "utf8").digest("hex");
+}
+
+function normalizeTagList(rawTags) {
+  if (!Array.isArray(rawTags)) return [];
+  return rawTags
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function isExtractedAtomicMemory(memoryRow) {
+  return String(memoryRow?.metadata?.memoryKind || "") === "extracted_atomic_memory";
+}
+
+async function extractAtomicMemoriesViaAgent({ sourceId, sourceFilename, sourceVersion, markdown }) {
+  let module;
+  try {
+    module = await import("../mastra/agents.js");
+  } catch (error) {
+    throw new Error(
+      `Mastra extraction layer unavailable. Ensure Mastra deps are installed before ingestion. Root cause: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  if (typeof module.runMemoryExtractorAgent !== "function") {
+    throw new Error("Mastra extraction function runMemoryExtractorAgent is not defined.");
+  }
+
+  const result = await module.runMemoryExtractorAgent({
+    sourceId,
+    sourceFilename,
+    sourceVersion,
+    markdown,
+  });
+
+  if (!Array.isArray(result?.memories)) {
+    throw new Error("Extractor agent returned invalid response: missing memories array.");
+  }
+
+  return result.memories;
+}
+
+export async function loadSourceVersionForExtraction({ sourceId, sourceVersion = null }) {
+  const source = projectMemoryRepo.getSourceById(sourceId);
+  if (!source) {
+    throw new Error(`Unknown source_id: ${sourceId}`);
+  }
+
+  const versionRow =
+    sourceVersion === null || sourceVersion === undefined
+      ? projectMemoryRepo.getLatestVersion(sourceId)
+      : projectMemoryRepo.getSourceVersion(sourceId, Number(sourceVersion));
+
+  if (!versionRow) {
+    throw new Error(`Source version not found for source_id=${sourceId} version=${String(sourceVersion ?? "latest")}`);
+  }
+
+  return {
+    source,
+    version: versionRow,
+  };
+}
+
+export async function applyExtractedMemories({
+  sourceId,
+  sourceVersion,
+  extractedMemories = [],
+  metadata = {},
+  allowEmpty = false,
+} = {}) {
+  const { source, version } = await loadSourceVersionForExtraction({ sourceId, sourceVersion });
+  const existingForSource = projectMemoryRepo.listMemoryRecordsBySource(sourceId);
+  const keepMemoryIds = new Set();
+  const persistedMemories = [];
+  const now = nowIso();
+  const markdown = version.contentMarkdown || "";
+
+  for (const row of extractedMemories) {
+    const statement = normalizeSentence(row?.statement, 600);
+    const kind = String(row?.kind || "").toLowerCase().trim();
+    if (!statement || statement.length < 10 || !kind) continue;
+
+    const fingerprint = extractionFingerprint(kind, statement);
+    const memoryId = extractedMemoryId(sourceId, fingerprint);
+    if (keepMemoryIds.has(memoryId)) continue;
+    keepMemoryIds.add(memoryId);
+
+    const citation = findCitationOffsets(markdown, row?.evidenceText, statement);
+    const tags = normalizeTagList(row?.tags);
+    const existing = existingForSource.find((item) => item.memoryId === memoryId);
+
+    const persisted = projectMemoryRepo.upsertMemoryRecord({
+      memoryId,
+      sourceId,
+      latestVersion: version.version,
+      summaryAuto: statement,
+      tagsAuto: tags,
+      linksAuto: [],
+      effectiveTitle: row?.title ? String(row.title).slice(0, 140) : null,
+      effectiveSummary: statement,
+      effectiveTags: tags,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      metadata: {
+        ...metadata,
+        sourceFilename: source.sourceFilename,
+        sourceVersion: version.version,
+        memoryKind: "extracted_atomic_memory",
+        extractedKind: kind,
+        extractionModel: EXTRACTOR_MODEL,
+        extractionFingerprint: fingerprint,
+        extractionConfidence: Number.isFinite(Number(row?.confidence)) ? Number(row.confidence) : null,
+        citation: {
+          sourceId,
+          sourceFilename: source.sourceFilename,
+          version: version.version,
+          startOffset: citation.startOffset,
+          endOffset: citation.endOffset,
+        },
+      },
+    });
+
+    projectMemoryRepo.replaceMemoryCategoriesBySource({
+      memoryId,
+      assignmentSource: "extractor_agent",
+      assignments: [
+        {
+          categoryId: categoryIdForBucket(kind),
+          confidence: Number.isFinite(Number(row?.confidence)) ? Number(row.confidence) : null,
+          reason: "extractor_agent_kind",
+        },
+      ],
+      assignedAt: now,
+    });
+
+    projectMemoryRepo.replaceMemoryEvidence({
+      memoryId,
+      sourceId,
+      sourceVersion: version.version,
+      createdAt: now,
+      evidenceItems: [
+        {
+          startOffset: citation.startOffset,
+          endOffset: citation.endOffset,
+          evidenceText: row?.evidenceText ? normalizeSentence(row.evidenceText, 400) : statement,
+          metadata: {
+            extractedKind: kind,
+            confidence: Number.isFinite(Number(row?.confidence)) ? Number(row.confidence) : null,
+          },
+        },
+      ],
+    });
+
+    persistedMemories.push(persisted);
+  }
+
+  if (!allowEmpty && persistedMemories.length === 0) {
+    throw new Error("Extractor produced zero atomic memories; refusing to erase existing memories.");
+  }
+
+  for (const existing of existingForSource) {
+    if (existing.memoryId === sourceId) continue;
+    if (isExtractedAtomicMemory(existing) && !keepMemoryIds.has(existing.memoryId)) {
+      projectMemoryRepo.deleteMemoryRecord(existing.memoryId);
+    }
+  }
+
+  // Always remove the legacy one-row-per-document memory representation.
+  projectMemoryRepo.deleteMemoryRecord(sourceId);
+
+  return {
+    source,
+    version,
+    extractedMemories: persistedMemories,
+    extractedCount: persistedMemories.length,
+  };
+}
+
+export async function getMemoryDecisionBatch(limit = 200) {
+  const rows = await listMemoryRecords(limit);
+  return rows.map((row) => ({
+    memoryId: row.memoryId,
+    sourceId: row.sourceId,
+    latestVersion: row.latestVersion,
+    effectiveTitle: row.effectiveTitle,
+    effectiveSummary: row.effectiveSummary,
+    effectiveTags: row.effectiveTags,
+    metadata: row.metadata,
+  }));
+}
+
+export async function applyOrganizerDecisions({
+  categoryAssignments = [],
+  relatedLinks = [],
+  assignmentSource = "organizer_agent",
+  relationType = "related",
+} = {}) {
+  const appliedAt = nowIso();
+  let appliedCategoryCount = 0;
+  let appliedRelationCount = 0;
+
+  for (const assignment of categoryAssignments) {
+    const memoryId = String(assignment?.memoryId || "").trim();
+    if (!memoryId) continue;
+    const categoryId = String(assignment?.categoryId || "").trim() || categoryIdForBucket(assignment?.bucket);
+    projectMemoryRepo.replaceMemoryCategoriesBySource({
+      memoryId,
+      assignmentSource,
+      assignments: [
+        {
+          categoryId,
+          confidence: Number.isFinite(Number(assignment?.confidence)) ? Number(assignment.confidence) : null,
+          reason: assignment?.reason ? String(assignment.reason) : null,
+        },
+      ],
+      assignedAt: appliedAt,
+    });
+    appliedCategoryCount += 1;
+  }
+
+  for (const link of relatedLinks) {
+    const leftId = String(link?.memoryId || "").trim();
+    const rightId = String(link?.relatedMemoryId || "").trim();
+    if (!leftId || !rightId || leftId === rightId) continue;
+    const confidence = Number.isFinite(Number(link?.confidence)) ? Number(link.confidence) : null;
+    const reason = link?.reason ? String(link.reason) : null;
+    projectMemoryRepo.upsertRelatedMemory({
+      memoryId: leftId,
+      relatedMemoryId: rightId,
+      relationType,
+      confidence,
+      reason,
+      linkedAt: appliedAt,
+    });
+    projectMemoryRepo.upsertRelatedMemory({
+      memoryId: rightId,
+      relatedMemoryId: leftId,
+      relationType,
+      confidence,
+      reason,
+      linkedAt: appliedAt,
+    });
+    appliedRelationCount += 2;
+  }
+
+  return {
+    appliedCategoryCount,
+    appliedRelationCount,
+  };
+}
+
+export async function applyConsolidatorAliasProposals({
+  aliasProposals = [],
+  proposalSource = "consolidator_agent",
+  defaultIsActive = false,
+} = {}) {
+  const rows = await listMemoryRecords(1000);
+  const sourceIdByMemoryId = new Map(rows.map((row) => [row.memoryId, row.sourceId]));
+  const updatedAt = nowIso();
+  let appliedAliasCount = 0;
+
+  for (const proposal of aliasProposals) {
+    const canonicalSourceId =
+      String(proposal?.canonicalSourceId || "").trim() ||
+      sourceIdByMemoryId.get(String(proposal?.canonicalMemoryId || "").trim());
+    const aliasSourceId =
+      String(proposal?.aliasSourceId || "").trim() ||
+      sourceIdByMemoryId.get(String(proposal?.aliasMemoryId || "").trim());
+
+    if (!canonicalSourceId || !aliasSourceId || canonicalSourceId === aliasSourceId) {
+      continue;
+    }
+
+    const confidence = Number.isFinite(Number(proposal?.confidence)) ? Number(proposal.confidence) : null;
+    const reasonParts = [proposalSource, proposal?.reason ? String(proposal.reason).trim() : ""].filter(Boolean);
+    projectMemoryRepo.upsertSourceAlias({
+      aliasSourceId,
+      canonicalSourceId,
+      reason: reasonParts.join(":"),
+      confidence,
+      isActive: proposal?.isActive === undefined ? defaultIsActive : Boolean(proposal.isActive),
+      updatedAt,
+    });
+    appliedAliasCount += 1;
+  }
+
+  return {
+    appliedAliasCount,
+  };
+}
+
+export async function runOrganizerPass({ limit = 200 } = {}) {
+  return runMemoryJob(
+    "organizer",
+    async () => {
+      const rows = await listMemoryRecords(limit);
+      const suggestions = rows.slice(0, 50).map((row) => ({
+        memoryId: row.memoryId,
+        suggestedBucket: detectTopLevelBucket(row),
+      }));
+
+      const linkSuggestions = [];
+      const sample = rows.slice(0, Math.min(rows.length, 100));
+      for (let i = 0; i < sample.length; i += 1) {
+        for (let j = i + 1; j < sample.length; j += 1) {
+          const score = tagOverlapScore(sample[i].effectiveTags, sample[j].effectiveTags);
+          if (score >= 0.6) {
+            linkSuggestions.push({
+              memoryId: sample[i].memoryId,
+              relatedMemoryId: sample[j].memoryId,
+              confidence: score,
+            });
+          }
+        }
+      }
+
+      const assignmentSource = "organizer_heuristic";
+      const assignedAt = nowIso();
+      for (const suggestion of suggestions) {
+        projectMemoryRepo.replaceMemoryCategoriesBySource({
+          memoryId: suggestion.memoryId,
+          assignmentSource,
+          assignments: [
+            {
+              categoryId: categoryIdForBucket(suggestion.suggestedBucket),
+              confidence: 0.55,
+              reason: `heuristic:${suggestion.suggestedBucket}`,
+            },
+          ],
+          assignedAt,
+        });
+      }
+
+      for (const link of linkSuggestions) {
+        projectMemoryRepo.upsertRelatedMemory({
+          memoryId: link.memoryId,
+          relatedMemoryId: link.relatedMemoryId,
+          relationType: "similar_tags",
+          confidence: link.confidence,
+          reason: "organizer_heuristic_tag_overlap",
+          linkedAt: assignedAt,
+        });
+        projectMemoryRepo.upsertRelatedMemory({
+          memoryId: link.relatedMemoryId,
+          relatedMemoryId: link.memoryId,
+          relationType: "similar_tags",
+          confidence: link.confidence,
+          reason: "organizer_heuristic_tag_overlap",
+          linkedAt: assignedAt,
+        });
+      }
+
+      return {
+        processedCount: rows.length,
+        summary: `persisted ${suggestions.length} category assignments and ${linkSuggestions.length} bidirectional link pairs`,
+        suggestions,
+        linkSuggestions,
+      };
+    },
+    { mode: "heuristic", limit }
+  );
+}
+
+export async function runConsolidatorPass({ limit = 200 } = {}) {
+  return runMemoryJob(
+    "consolidator",
+    async () => {
+      const rows = await listMemoryRecords(limit);
+      const sourceIdByMemoryId = new Map(rows.map((row) => [row.memoryId, row.sourceId]));
+      const groupedBySummary = new Map();
+      for (const row of rows) {
+        const key = String(row.effectiveSummary || "").toLowerCase().trim();
+        if (!key) continue;
+        if (!groupedBySummary.has(key)) groupedBySummary.set(key, []);
+        groupedBySummary.get(key).push(row.memoryId);
+      }
+
+      const candidateAliases = [];
+      for (const [summary, ids] of groupedBySummary.entries()) {
+        if (ids.length < 2) continue;
+        candidateAliases.push({
+          summary,
+          canonicalMemoryId: ids[0],
+          duplicateMemoryIds: ids.slice(1),
+        });
+      }
+
+      const aliasUpdatedAt = nowIso();
+      let aliasProposalCount = 0;
+      for (const candidate of candidateAliases) {
+        const canonicalSourceId = sourceIdByMemoryId.get(candidate.canonicalMemoryId);
+        if (!canonicalSourceId) continue;
+        for (const duplicateMemoryId of candidate.duplicateMemoryIds) {
+          const aliasSourceId = sourceIdByMemoryId.get(duplicateMemoryId);
+          if (!aliasSourceId || aliasSourceId === canonicalSourceId) continue;
+          projectMemoryRepo.upsertSourceAlias({
+            aliasSourceId,
+            canonicalSourceId,
+            reason: "consolidator_fuzzy_candidate_pending_review",
+            confidence: 0.6,
+            isActive: false,
+            updatedAt: aliasUpdatedAt,
+          });
+          aliasProposalCount += 1;
+        }
+      }
+
+      return {
+        processedCount: rows.length,
+        summary: `generated ${candidateAliases.length} consolidation candidate groups and persisted ${aliasProposalCount} alias proposals`,
+        candidateAliases,
+      };
+    },
+    { mode: "heuristic", limit }
+  );
 }

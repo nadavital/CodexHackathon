@@ -23,6 +23,7 @@ AI-powered personal project memory with:
 - `mcp/server.js`: MCP stdio server exposing memory tools
 - `openclaw/bridge.js`: command bridge for OpenClaw tools
 - `openclaw/tools.manifest.json`: OpenClaw tool schema reference
+- `docs/memory-layer-plan.md`: Internal memory-layer plan and handoff notes
 
 ## Quick start
 

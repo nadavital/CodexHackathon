@@ -4,6 +4,8 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  ingestProcessedMarkdown,
+  listMemoryRecords,
   listRecentMemories,
   searchMemories,
 } from "../src/memoryService.js";
@@ -79,6 +81,33 @@ const TOOL_DEFS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "project_memory_ingest_processed",
+    description: "Ingest pipeline-processed markdown into versioned memory storage.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filename: { type: "string" },
+        markdown: { type: "string" },
+        sourcePath: { type: "string" },
+        externalSourceId: { type: "string" },
+        agentfsUri: { type: "string" },
+      },
+      required: ["filename", "markdown"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "project_memory_records",
+    description: "List versioned memory records from the new memory layer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", default: 20 },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 function sendMessage(payload) {
@@ -146,6 +175,21 @@ async function callTool(name, args = {}) {
         limit: Number(args.limit || 6),
       });
       return answer;
+    }
+    case "project_memory_ingest_processed": {
+      const result = await ingestProcessedMarkdown({
+        filename: String(args.filename || ""),
+        markdown: String(args.markdown || ""),
+        sourcePath: String(args.sourcePath || ""),
+        externalSourceId: String(args.externalSourceId || ""),
+        agentfsUri: args.agentfsUri ? String(args.agentfsUri) : null,
+        metadata: { createdFrom: "mcp" },
+      });
+      return result;
+    }
+    case "project_memory_records": {
+      const records = await listMemoryRecords(Number(args.limit || 20));
+      return { records };
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

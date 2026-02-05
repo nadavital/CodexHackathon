@@ -2,6 +2,8 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  ingestProcessedMarkdown,
+  listMemoryRecords,
   listRecentMemories,
   searchMemories,
 } from "../src/memoryService.js";
@@ -58,6 +60,19 @@ async function run() {
           project: String(args.project || ""),
           limit: Number(args.limit || 6),
         });
+        break;
+      case "project_memory_ingest_processed":
+        result = await ingestProcessedMarkdown({
+          filename: String(args.filename || ""),
+          markdown: String(args.markdown || ""),
+          sourcePath: String(args.sourcePath || ""),
+          externalSourceId: String(args.externalSourceId || ""),
+          agentfsUri: args.agentfsUri ? String(args.agentfsUri) : null,
+          metadata: { createdFrom: "openclaw" },
+        });
+        break;
+      case "project_memory_records":
+        result = await listMemoryRecords(Number(args.limit || 20));
         break;
       default:
         throw new Error(`Unknown tool: ${toolName}`);

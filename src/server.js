@@ -9,6 +9,8 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  ingestProcessedMarkdown,
+  listMemoryRecords,
   listProjects,
   listRecentMemories,
   searchMemories,
@@ -145,6 +147,31 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/projects") {
     const projects = listProjects();
     sendJson(res, 200, { items: projects, count: projects.length });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/memory/records") {
+    const limit = Number(url.searchParams.get("limit") || "50");
+    const items = await listMemoryRecords(limit);
+    sendJson(res, 200, { items, count: items.length });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/memory/ingest") {
+    const body = await readJsonBody(req);
+    const result = await ingestProcessedMarkdown({
+      filename: body.filename,
+      markdown: body.markdown,
+      sourcePath: body.sourcePath,
+      externalSourceId: body.externalSourceId,
+      metadata: {
+        ...(body.metadata || {}),
+        createdFrom: "pipeline-api",
+      },
+      agentfsUri: body.agentfsUri || null,
+    });
+
+    sendJson(res, 200, result);
     return;
   }
 
