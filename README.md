@@ -46,11 +46,17 @@ npm run start:mcp
 
 This exposes tools:
 
-- `project_memory_search`
-- `project_memory_save`
-- `project_memory_recent`
-- `project_memory_context`
-- `project_memory_ask`
+- `personio_tasks_list_open`
+- `personio_notes_search`
+- `personio_get_memory_file`
+- `personio_memory_save_tool`
+
+`personio_get_memory_file` reads the consolidated memory markdown file.
+Set `CONSOLIDATED_MEMORY_MARKDOWN_FILE` in `.env` to override the default at `data/consolidated-memory.md`.
+
+`personio_notes_search` supports:
+- `searchMode: "semantic"` (default)
+- `searchMode: "raw"`
 
 Example Codex MCP config snippet:
 

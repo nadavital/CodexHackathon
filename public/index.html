@@ -3,112 +3,150 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Project Memory</title>
+    <title>Memory Observatory</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="bg-orb bg-orb-a"></div>
-    <div class="bg-orb bg-orb-b"></div>
-
-    <main class="shell">
-      <header class="hero">
+    <div class="noise"></div>
+    <main class="app-shell">
+      <header class="topbar">
         <div>
-          <p class="eyebrow">Hackathon Build</p>
-          <h1>Project Memory</h1>
-          <p class="subtitle">AI-powered personal knowledge vault with MCP + OpenClaw-ready tools.</p>
+          <p class="kicker">Local-first AI Memory</p>
+          <h1>Memory Observatory</h1>
+          <p class="tagline">Upload notes/files and manage daily tasks in one place.</p>
         </div>
-        <div class="status" id="status-pill">checking model status...</div>
+        <div class="status-wrap">
+          <span id="status-pill" class="status-pill">Checking backend...</span>
+          <span id="memory-count" class="memory-count">0 memories</span>
+        </div>
       </header>
 
-      <section class="grid">
-        <article class="card capture-card">
-          <h2>Capture</h2>
-          <form id="capture-form">
-            <label>
-              Source type
-              <select id="source-type" name="sourceType">
-                <option value="text">Text</option>
-                <option value="link">Link</option>
-                <option value="image">Image</option>
-                <option value="file">File (PDF, DOCX, etc.)</option>
-              </select>
-            </label>
+      <nav class="tabs" aria-label="Main sections">
+        <button id="tab-memory" class="tab-button active" type="button">Memory</button>
+        <button id="tab-tasks" class="tab-button" type="button">Tasks</button>
+      </nav>
 
-            <label>
-              Project (optional)
-              <input id="project-input" name="project" placeholder="launch-site, ios-app, growth" />
-            </label>
+      <section id="memory-page" class="page">
+        <section class="insight-row">
+          <article class="panel hero-metric">
+            <p class="panel-label">Project Heatmap</p>
+            <div id="project-chips" class="chip-grid"></div>
+          </article>
+          <article class="panel hero-metric">
+            <p class="panel-label">Source Mix</p>
+            <div id="source-bars" class="source-bars"></div>
+          </article>
+          <article class="panel hero-metric">
+            <p class="panel-label">Fresh Memory</p>
+            <div id="fresh-memory" class="fresh-memory">No data yet.</div>
+          </article>
+        </section>
 
-            <label id="source-url-wrap" class="hidden">
-              Source URL
-              <input id="source-url-input" name="sourceUrl" placeholder="https://..." />
-            </label>
+        <section class="layout-grid">
+          <article class="panel timeline-panel">
+            <div class="panel-top">
+              <h2>Memory Stream</h2>
+              <button id="refresh-btn" class="button button-soft">Refresh</button>
+            </div>
+            <div class="filter-row">
+              <input id="search-input" placeholder="Search all memory..." />
+              <input id="project-filter-input" placeholder="Filter by project" />
+              <button id="search-btn" class="button button-soft">Go</button>
+            </div>
+            <div id="timeline" class="timeline"></div>
+          </article>
 
-            <label>
-              Content
-              <textarea id="content-input" name="content" rows="6" placeholder="Drop notes, context, ideas, decisions, TODOs..."></textarea>
-            </label>
+          <article class="panel inspector-panel">
+            <h2>Inspector</h2>
+            <p class="subtle">Click any memory to inspect full details and extracted content.</p>
+            <div id="inspector" class="inspector-empty">Select a memory from the stream.</div>
 
-            <label id="image-wrap" class="hidden file-input-wrap">
-              Upload file
-              <input id="image-input" type="file" accept="image/*,.pdf,.doc,.docx,.txt,.md,.rtf,.csv,.json,.xml,.html,.ppt,.pptx,.xls,.xlsx" />
-              <img id="image-preview" alt="image preview" class="image-preview hidden" />
-            </label>
+            <div class="chat-block">
+              <h3>Grounded Ask</h3>
+              <form id="chat-form">
+                <textarea id="question-input" rows="3" placeholder="What did I decide about MCP + OpenClaw integration?"></textarea>
+                <button class="button" type="submit">Ask Memory</button>
+              </form>
+              <pre id="answer-output" class="answer-output">No question yet.</pre>
+              <div id="citation-list" class="citation-list"></div>
+              <button id="context-btn" class="button button-soft">Generate Context Brief</button>
+            </div>
+          </article>
 
-            <button class="btn" id="save-btn" type="submit">Save Memory</button>
-          </form>
-        </article>
+          <article class="panel capture-panel">
+            <h2>Capture New Memory</h2>
+            <form id="capture-form">
+              <label>
+                Source type
+                <select id="source-type" name="sourceType">
+                  <option value="text">Text</option>
+                  <option value="link">Link</option>
+                  <option value="image">Image</option>
+                  <option value="file">File</option>
+                </select>
+              </label>
 
-        <article class="card stream-card">
-          <div class="card-header">
-            <h2>Memory Stream</h2>
-            <button id="refresh-btn" class="btn subtle">Refresh</button>
-          </div>
+              <label>
+                Project
+                <input id="project-input" name="project" placeholder="Hackathon Demo" />
+              </label>
 
-          <div class="row filters-row">
-            <input id="search-input" placeholder="Search memory..." />
-            <input id="project-filter-input" placeholder="Project filter" />
-            <button id="search-btn" class="btn subtle">Search</button>
-          </div>
+              <label id="source-url-wrap" class="hidden">
+                Source URL
+                <input id="source-url-input" name="sourceUrl" placeholder="https://..." />
+              </label>
 
-          <div id="notes-list" class="notes-list"></div>
-        </article>
+              <label>
+                Content
+                <textarea id="content-input" name="content" rows="6" placeholder="Write notes, decisions, TODOs..."></textarea>
+              </label>
 
-        <article class="card chat-card">
-          <h2>Grounded Chat</h2>
-          <form id="chat-form">
-            <label>
-              Ask your memory
-              <textarea id="question-input" rows="4" placeholder="What decisions did I make for launch onboarding?"></textarea>
-            </label>
-            <button class="btn" type="submit">Ask</button>
-          </form>
+              <label id="image-wrap" class="hidden">
+                Upload file
+                <input id="image-input" type="file" accept="image/*,.pdf,.doc,.docx,.txt,.md,.rtf,.csv,.json,.xml,.html,.ppt,.pptx,.xls,.xlsx" />
+                <img id="image-preview" alt="image preview" class="image-preview hidden" />
+              </label>
 
-          <div class="response-wrap">
-            <p class="response-title">Answer</p>
-            <pre id="answer-output" class="answer-output">No question yet.</pre>
-          </div>
+              <button id="save-btn" class="button" type="submit">Save Memory</button>
+            </form>
+          </article>
+        </section>
+      </section>
 
-          <div class="response-wrap">
-            <p class="response-title">Citations</p>
-            <div id="citation-list" class="citation-list"></div>
-          </div>
+      <section id="tasks-page" class="page hidden">
+        <section class="tasks-layout">
+          <article class="panel tasks-compose">
+            <h2>Add Task</h2>
+            <p class="subtle">Create simple action tasks like messaging people or running deep research.</p>
+            <form id="task-form">
+              <label>
+                Task title
+                <input id="task-title-input" placeholder="message ashna about weekend plans" />
+              </label>
+              <button class="button" type="submit">Add Task</button>
+            </form>
+          </article>
 
-          <button id="context-btn" class="btn subtle">Generate Project Context Brief</button>
-        </article>
+          <article class="panel tasks-list-panel">
+            <div class="panel-top">
+              <h2>Open Tasks</h2>
+              <button id="tasks-refresh-btn" class="button button-soft" type="button">Refresh</button>
+            </div>
+            <div id="tasks-list" class="tasks-list"></div>
+          </article>
+        </section>
       </section>
     </main>
 
-    <template id="note-template">
-      <article class="note-item">
-        <div class="note-top">
-          <span class="note-project"></span>
-          <span class="note-score"></span>
+    <template id="timeline-item-template">
+      <article class="memory-card">
+        <div class="memory-head">
+          <span class="memory-project"></span>
+          <span class="memory-time"></span>
         </div>
-        <p class="note-summary"></p>
-        <p class="note-content"></p>
-        <div class="note-tags"></div>
-        <div class="note-meta"></div>
+        <p class="memory-summary"></p>
+        <p class="memory-content"></p>
+        <div class="memory-tags"></div>
       </article>
     </template>
 

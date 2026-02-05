@@ -44,6 +44,11 @@ function parsePort(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function resolveDataPath(value, fallbackAbsolutePath) {
+  if (!value) return fallbackAbsolutePath;
+  return path.isAbsolute(value) ? value : path.resolve(ROOT_DIR, value);
+}
+
 export const config = {
   port: parsePort(process.env.PORT, 8787),
   openaiApiKey:
@@ -58,6 +63,14 @@ export const config = {
   uploadDir: UPLOAD_DIR,
   mcpServerName: process.env.MCP_SERVER_NAME || "project-memory",
   mcpServerVersion: process.env.MCP_SERVER_VERSION || "0.1.0",
+  consolidatedMemoryMarkdownFile: resolveDataPath(
+    process.env.CONSOLIDATED_MEMORY_MARKDOWN_FILE,
+    path.join(DATA_DIR, "consolidated-memory.md")
+  ),
+  extractedMemoryMarkdownFile: resolveDataPath(
+    process.env.EXTRACTED_MEMORY_MARKDOWN_FILE,
+    path.join(DATA_DIR, "extracted-memory.md")
+  ),
 };
 
 export function publicUploadPath(fileName) {

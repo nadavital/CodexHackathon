@@ -8,6 +8,8 @@
     "dev": "node --watch src/server.js",
     "start:mcp": "node mcp/server.js",
     "dev:mcp": "node --watch mcp/server.js",
-    "openclaw:tool": "node openclaw/bridge.js"
+    "openclaw:tool": "node openclaw/bridge.js",
+    "test:mcp-client": "node scripts/test_mcp_client.js",
+    "import:keep": "node scripts/import_google_keep_takeout.js"
   }
 }

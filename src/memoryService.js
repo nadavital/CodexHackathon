@@ -15,6 +15,16 @@ import {
 } from "./openai.js";
 
 const SOURCE_TYPES = new Set(["text", "link", "image", "file"]);
+const CONSOLIDATED_SECTIONS = [
+  "Projects & Work",
+  "People & Relationships",
+  "Research & Learning",
+  "Finance & Admin",
+  "Travel & Logistics",
+  "Health & Lifestyle",
+  "Personal Life",
+  "General",
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -176,18 +186,19 @@ async function imagePathToDataUrl(imagePath) {
 }
 
 function noteTextForEmbedding(note, linkPreview) {
+  const compact = (text, max = 2500) => String(text || "").slice(0, max);
   const parts = [
-    note.content || "",
-    note.rawContent || "",
-    note.markdownContent || "",
-    note.fileName || "",
-    note.fileMime || "",
-    note.summary || "",
+    compact(note.content, 2000),
+    compact(note.rawContent, 2500),
+    compact(note.markdownContent, 2500),
+    compact(note.fileName, 200),
+    compact(note.fileMime, 120),
+    compact(note.summary, 300),
     Array.isArray(note.tags) ? note.tags.join(" ") : "",
-    note.project || "",
-    note.sourceUrl || "",
-    linkPreview?.title || "",
-    linkPreview?.excerpt || "",
+    compact(note.project, 120),
+    compact(note.sourceUrl, 300),
+    compact(linkPreview?.title, 300),
+    compact(linkPreview?.excerpt, 1000),
   ];
   return parts.filter(Boolean).join("\n\n");
 }
@@ -216,10 +227,19 @@ function lexicalScore(note, queryTokens) {
   return overlap / queryTokens.length;
 }
 
-async function buildEnrichment(note, linkPreview = null) {
+async function buildEnrichment(note, linkPreview = null, precomputed = null) {
   const fallbackSummary = heuristicSummary(note.content);
   const fallbackTags = heuristicTags(`${note.content} ${linkPreview?.title || ""}`);
   const fallbackProject = note.project || buildProjectFallback(note.sourceUrl, fallbackTags);
+
+  if (precomputed && (precomputed.summary || (Array.isArray(precomputed.tags) && precomputed.tags.length) || precomputed.project)) {
+    return {
+      summary: String(precomputed.summary || fallbackSummary).trim().slice(0, 220) || fallbackSummary,
+      tags: Array.isArray(precomputed.tags) && precomputed.tags.length ? precomputed.tags.slice(0, 8) : fallbackTags,
+      project: String(precomputed.project || fallbackProject).trim().slice(0, 80) || fallbackProject,
+      enrichmentSource: "openai-upload",
+    };
+  }
 
   if (!hasOpenAI()) {
     return {
@@ -318,6 +338,111 @@ function materializeCitation(note, score, rank) {
   };
 }
 
+function makeExcerpt(text, query, maxLen = 320) {
+  const normalizedText = String(text || "");
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedText) return "";
+  if (!normalizedQuery) return normalizedText.slice(0, maxLen);
+
+  const lower = normalizedText.toLowerCase();
+  const idx = lower.indexOf(normalizedQuery);
+  if (idx === -1) return normalizedText.slice(0, maxLen);
+
+  const start = Math.max(0, idx - Math.floor(maxLen * 0.3));
+  const end = Math.min(normalizedText.length, start + maxLen);
+  return normalizedText.slice(start, end);
+}
+
+function makeConsolidatedTemplate(lastUpdatedIso = nowIso()) {
+  const sectionBlocks = CONSOLIDATED_SECTIONS.map((section) => `## ${section}\n\n_No entries yet._`).join("\n\n");
+  return [
+    "# Consolidated User Memory",
+    "",
+    "**Purpose:** Single evolving memory file across user uploads.",
+    `**Last Updated:** ${lastUpdatedIso}`,
+    "",
+    sectionBlocks,
+    "",
+  ].join("\n");
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function classifyMemorySection(note) {
+  const text = `${note.project || ""} ${(note.tags || []).join(" ")} ${note.fileName || ""} ${note.summary || ""} ${note.content || ""}`.toLowerCase();
+  if (/\b(message|call|follow up|landlord|mom|ashna|friend|family|team)\b/.test(text)) return "People & Relationships";
+  if (/\b(research|paper|study|analysis|learn|deep research|interview)\b/.test(text)) return "Research & Learning";
+  if (/\b(receipt|invoice|tax|w2|1099|payment|credit card|expense|bank)\b/.test(text)) return "Finance & Admin";
+  if (/\b(flight|travel|trip|itinerary|hotel|airbnb|uber|lyft)\b/.test(text)) return "Travel & Logistics";
+  if (/\b(health|medical|doctor|surgery|gym|fitness|diet)\b/.test(text)) return "Health & Lifestyle";
+  if (note.project && note.project.trim()) return "Projects & Work";
+  if (/\b(home|personal|grocery|meal|weekend)\b/.test(text)) return "Personal Life";
+  return "General";
+}
+
+function buildConsolidatedEntry(note) {
+  const timestamp = note.createdAt || nowIso();
+  const title = note.summary || note.fileName || heuristicSummary(note.content, 120);
+  const markdownExcerpt = String(note.markdownContent || "").slice(0, 2200).trim();
+  const rawExcerpt = String(note.rawContent || "").slice(0, 1200).trim();
+  const tags = Array.isArray(note.tags) && note.tags.length ? note.tags.join(", ") : "none";
+
+  const parts = [
+    `### ${timestamp} | ${title}`,
+    `- note_id: ${note.id}`,
+    `- project: ${note.project || "General"}`,
+    `- source_type: ${note.sourceType || "text"}`,
+    `- tags: ${tags}`,
+  ];
+
+  if (markdownExcerpt) {
+    parts.push("", "#### Markdown Extract", "```md", markdownExcerpt, "```");
+  }
+  if (rawExcerpt && rawExcerpt !== markdownExcerpt) {
+    parts.push("", "#### Raw Extract", "```text", rawExcerpt, "```");
+  }
+
+  return parts.join("\n");
+}
+
+async function updateConsolidatedMemoryFile(note) {
+  const filePath = config.consolidatedMemoryMarkdownFile;
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+  let content;
+  try {
+    content = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      content = makeConsolidatedTemplate();
+    } else {
+      throw error;
+    }
+  }
+
+  if (content.includes(`note_id: ${note.id}`)) {
+    return;
+  }
+
+  const section = classifyMemorySection(note);
+  if (!content.includes(`## ${section}\n`)) {
+    content = `${content.trimEnd()}\n\n## ${section}\n\n_No entries yet._\n`;
+  }
+
+  const entry = buildConsolidatedEntry(note);
+  const sectionPattern = new RegExp(`(^## ${escapeRegExp(section)}\\n)([\\s\\S]*?)(?=\\n## |$)`, "m");
+  content = content.replace(sectionPattern, (full, header, body) => {
+    const trimmed = String(body || "").trim();
+    const base = !trimmed || trimmed === "_No entries yet._" ? "" : `${trimmed}\n\n`;
+    return `${header}${base}${entry}\n`;
+  });
+
+  content = content.replace(/\*\*Last Updated:\*\* .*/, `**Last Updated:** ${nowIso()}`);
+  await fs.writeFile(filePath, content, "utf8");
+}
+
 export async function createMemory({
   content = "",
   sourceType = "text",
@@ -329,6 +454,7 @@ export async function createMemory({
   project = "",
   metadata = {},
 }) {
+  const tStart = Date.now();
   const requestedSourceType = normalizeSourceType(sourceType);
   const normalizedSourceUrl = String(sourceUrl || "").trim();
   let normalizedContent = String(content || "").trim();
@@ -362,6 +488,7 @@ export async function createMemory({
 
   let rawContent = null;
   let markdownContent = null;
+  let uploadEnrichment = null;
   if (normalizedFileDataUrl) {
     const parsedUpload = await convertUploadToMarkdown({
       fileDataUrl: normalizedFileDataUrl,
@@ -370,6 +497,11 @@ export async function createMemory({
     });
     rawContent = parsedUpload.rawContent || null;
     markdownContent = parsedUpload.markdownContent || null;
+    uploadEnrichment = {
+      summary: parsedUpload.summary || "",
+      tags: Array.isArray(parsedUpload.tags) ? parsedUpload.tags : [],
+      project: parsedUpload.project || "",
+    };
   }
 
   if (!normalizedContent && markdownContent) {
@@ -415,7 +547,7 @@ export async function createMemory({
     },
   });
 
-  const enrichment = await buildEnrichment(note, linkPreview);
+  const enrichment = await buildEnrichment(note, linkPreview, uploadEnrichment);
   const embeddingText = noteTextForEmbedding(
     {
       ...note,
@@ -427,13 +559,20 @@ export async function createMemory({
   );
 
   let embedding;
+  let embeddingSource = "openai";
   try {
-    embedding = await createEmbedding(embeddingText);
+    if (normalizedSourceType === "file" && embeddingText.length > 5000) {
+      embedding = pseudoEmbedding(embeddingText);
+      embeddingSource = "pseudo-large-upload";
+    } else {
+      embedding = await createEmbedding(embeddingText);
+    }
   } catch {
     embedding = pseudoEmbedding(embeddingText);
+    embeddingSource = "pseudo-fallback";
   }
 
-  return noteRepo.updateEnrichment({
+  const enrichedNote = noteRepo.updateEnrichment({
     id,
     summary: enrichment.summary,
     tags: enrichment.tags,
@@ -442,14 +581,123 @@ export async function createMemory({
     metadata: {
       ...(note.metadata || {}),
       enrichmentSource: enrichment.enrichmentSource,
+      embeddingSource,
+      processingMs: Date.now() - tStart,
       enrichedAt: nowIso(),
     },
     updatedAt: nowIso(),
   });
+
+  if (normalizedFileDataUrl) {
+    await updateConsolidatedMemoryFile(enrichedNote);
+  }
+
+  return enrichedNote;
 }
 
 export async function listRecentMemories(limit = 20) {
   return noteRepo.listRecent(clampInt(limit, 1, 200, 20));
+}
+
+export async function getMemoryRawContent({ id, includeMarkdown = true, maxChars = 12000 } = {}) {
+  const normalizedId = String(id || "").trim();
+  if (!normalizedId) {
+    throw new Error("Missing id");
+  }
+
+  const note = noteRepo.getNoteById(normalizedId);
+  if (!note) {
+    throw new Error(`Memory not found: ${normalizedId}`);
+  }
+
+  const boundedMax = clampInt(maxChars, 200, 200000, 12000);
+  return {
+    id: note.id,
+    sourceType: note.sourceType,
+    fileName: note.fileName,
+    fileMime: note.fileMime,
+    project: note.project,
+    createdAt: note.createdAt,
+    rawContent: String(note.rawContent || "").slice(0, boundedMax),
+    markdownContent: includeMarkdown ? String(note.markdownContent || "").slice(0, boundedMax) : undefined,
+  };
+}
+
+export async function searchRawMemories({ query = "", project = "", limit = 8, includeMarkdown = true } = {}) {
+  const normalizedQuery = String(query || "").trim();
+  if (!normalizedQuery) {
+    throw new Error("Missing query");
+  }
+
+  const boundedLimit = clampInt(limit, 1, 100, 8);
+  const normalizedProject = String(project || "").trim();
+  const directMatches = noteRepo.searchNotes(normalizedQuery, {
+    project: normalizedProject || null,
+    limit: boundedLimit * 4,
+  });
+
+  const tokenizedQuery = tokenize(normalizedQuery);
+  const ranked = directMatches
+    .map((note) => {
+      const searchableText = `${note.rawContent || ""}\n${note.markdownContent || ""}\n${note.content || ""}`;
+      const score = lexicalScore(
+        {
+          ...note,
+          content: searchableText,
+          rawContent: note.rawContent || "",
+          markdownContent: note.markdownContent || "",
+        },
+        tokenizedQuery
+      );
+      return { note, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, boundedLimit)
+    .map((entry, index) => ({
+      rank: index + 1,
+      score: entry.score,
+      note: {
+        id: entry.note.id,
+        project: entry.note.project,
+        sourceType: entry.note.sourceType,
+        fileName: entry.note.fileName,
+        fileMime: entry.note.fileMime,
+        createdAt: entry.note.createdAt,
+        summary: entry.note.summary,
+        excerpt: makeExcerpt(entry.note.rawContent || entry.note.markdownContent || entry.note.content || "", normalizedQuery),
+        rawContent: String(entry.note.rawContent || ""),
+        markdownContent: includeMarkdown ? String(entry.note.markdownContent || "") : undefined,
+      },
+    }));
+
+  return ranked;
+}
+
+export async function readExtractedMarkdownMemory({ filePath = "", maxChars = 30000 } = {}) {
+  const boundedMax = clampInt(maxChars, 200, 500000, 30000);
+  const requestedPath = String(filePath || "").trim();
+  const resolvedFilePath = requestedPath || config.consolidatedMemoryMarkdownFile;
+  let content;
+  try {
+    content = await fs.readFile(resolvedFilePath, "utf8");
+  } catch (error) {
+    const isMissing = error && typeof error === "object" && "code" in error && error.code === "ENOENT";
+    if (isMissing && !requestedPath) {
+      content = makeConsolidatedTemplate();
+      await fs.writeFile(resolvedFilePath, content, "utf8");
+    } else if (isMissing) {
+      throw new Error(`Consolidated markdown memory file not found: ${resolvedFilePath}`);
+    } else {
+      throw error;
+    }
+  }
+
+  return {
+    filePath: resolvedFilePath,
+    bytes: Buffer.byteLength(content, "utf8"),
+    content: content.slice(0, boundedMax),
+    truncated: content.length > boundedMax,
+  };
 }
 
 export function listProjects() {

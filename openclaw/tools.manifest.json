@@ -19,6 +19,44 @@
       }
     },
     {
+      "name": "project_memory_search_raw_content",
+      "description": "Search extracted raw/markdown content",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "project": { "type": "string" },
+          "includeMarkdown": { "type": "boolean" },
+          "limit": { "type": "number" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "project_memory_get_raw_content",
+      "description": "Get full raw content for a memory id",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "includeMarkdown": { "type": "boolean" },
+          "maxChars": { "type": "number" }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "name": "project_memory_read_extracted_markdown",
+      "description": "Read the extracted markdown memory file",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string" },
+          "maxChars": { "type": "number" }
+        }
+      }
+    },
+    {
       "name": "project_memory_save",
       "description": "Save a memory",
       "arguments_schema": {

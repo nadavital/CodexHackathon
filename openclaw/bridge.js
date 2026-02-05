@@ -2,7 +2,10 @@ import {
   askMemories,
   buildProjectContext,
   createMemory,
+  getMemoryRawContent,
   listRecentMemories,
+  readExtractedMarkdownMemory,
+  searchRawMemories,
   searchMemories,
 } from "../src/memoryService.js";
 
@@ -31,6 +34,27 @@ async function run() {
           query: String(args.query || ""),
           project: String(args.project || ""),
           limit: Number(args.limit || 8),
+        });
+        break;
+      case "project_memory_search_raw_content":
+        result = await searchRawMemories({
+          query: String(args.query || ""),
+          project: String(args.project || ""),
+          includeMarkdown: args.includeMarkdown !== false,
+          limit: Number(args.limit || 8),
+        });
+        break;
+      case "project_memory_get_raw_content":
+        result = await getMemoryRawContent({
+          id: String(args.id || ""),
+          includeMarkdown: args.includeMarkdown !== false,
+          maxChars: Number(args.maxChars || 12000),
+        });
+        break;
+      case "project_memory_read_extracted_markdown":
+        result = await readExtractedMarkdownMemory({
+          filePath: String(args.filePath || ""),
+          maxChars: Number(args.maxChars || 30000),
         });
         break;
       case "project_memory_save":

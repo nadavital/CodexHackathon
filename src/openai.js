@@ -188,10 +188,13 @@ export async function convertUploadToMarkdown({
       };
 
   const convertInstructions =
-    "Extract the uploaded file into markdown. Return JSON only with keys: rawContent (plain text extraction), markdownContent (well-structured markdown). Do not wrap in code fences.";
+    "Extract the uploaded file into markdown. Return JSON only with keys: rawContent (plain text extraction), markdownContent (well-structured markdown), summary (<=180 chars), tags (array of 3-8 short lowercase tags), project (2-4 words). Do not wrap in code fences.";
 
   let rawContent = "";
   let markdownContent = "";
+  let summary = "";
+  let tags = [];
+  let project = "";
   try {
     const { text } = await createResponse({
       instructions: convertInstructions,
@@ -213,6 +216,14 @@ export async function convertUploadToMarkdown({
     const parsed = parseJsonObject(text);
     rawContent = typeof parsed?.rawContent === "string" ? parsed.rawContent.trim() : "";
     markdownContent = typeof parsed?.markdownContent === "string" ? parsed.markdownContent.trim() : "";
+    summary = typeof parsed?.summary === "string" ? parsed.summary.trim() : "";
+    tags = Array.isArray(parsed?.tags)
+      ? parsed.tags
+          .map((tag) => String(tag).toLowerCase().trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    project = typeof parsed?.project === "string" ? parsed.project.trim() : "";
   } catch (error) {
     const isDocx =
       fileMimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
@@ -245,6 +256,14 @@ export async function convertUploadToMarkdown({
     const parsed = parseJsonObject(text);
     rawContent = typeof parsed?.rawContent === "string" ? parsed.rawContent.trim() : extractedText;
     markdownContent = typeof parsed?.markdownContent === "string" ? parsed.markdownContent.trim() : extractedText;
+    summary = typeof parsed?.summary === "string" ? parsed.summary.trim() : "";
+    tags = Array.isArray(parsed?.tags)
+      ? parsed.tags
+          .map((tag) => String(tag).toLowerCase().trim())
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    project = typeof parsed?.project === "string" ? parsed.project.trim() : "";
   }
 
   if (!rawContent && !markdownContent) {
@@ -254,6 +273,9 @@ export async function convertUploadToMarkdown({
   return {
     rawContent: rawContent || markdownContent,
     markdownContent: markdownContent || rawContent,
+    summary,
+    tags,
+    project,
   };
 }
 

@@ -13,6 +13,7 @@ import {
   listRecentMemories,
   searchMemories,
 } from "./memoryService.js";
+import { taskRepo } from "./tasksDb.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -186,6 +187,23 @@ async function handleApi(req, res, url) {
       limit: Number(body.limit || 8),
     });
     sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/tasks") {
+    const status = url.searchParams.get("status") || "open";
+    const tasks = taskRepo.listTasks(status);
+    sendJson(res, 200, { items: tasks, count: tasks.length });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/tasks") {
+    const body = await readJsonBody(req);
+    const task = taskRepo.createTask({
+      title: body.title,
+      status: body.status || "open",
+    });
+    sendJson(res, 201, { task });
     return;
   }
 
